@@ -1,0 +1,41 @@
+pipeline {
+  agent any
+  environment {
+    AWS_REGION = "us-east-1"
+    AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
+    ECR_REPO = "${env.ECR_REPO}"
+    IMAGE_TAG = "${env.IMAGE_TAG ?: "${env.BUILD_NUMBER}"}"
+    CLUSTER_NAME = "${env.CLUSTER_NAME}"
+    SERVICE_NAME = "${env.SERVICE_NAME}"
+    TASK_FAMILY = "${env.TASK_FAMILY}"
+  }
+  stages {
+    stage('Checkout') {
+      steps { checkout scm }
+    }
+    stage('Build') {
+      steps {
+        sh './mvnw -B -DskipTests package'
+      }
+    }
+    stage('Test') {
+      steps {
+        sh './mvnw test -q'
+      }
+    }
+    stage('Build & Push Image') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          sh "./scripts/ecr_login_and_push.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${ECR_REPO} ${IMAGE_TAG}"
+        }
+      }
+    }
+    stage('Deploy to ECS') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          sh "./scripts/deploy_ecs.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${CLUSTER_NAME} ${SERVICE_NAME} ${TASK_FAMILY} ${ECR_REPO} ${IMAGE_TAG}"
+        }
+      }
+    }
+  }
+}
