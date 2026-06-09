@@ -1,13 +1,21 @@
 pipeline {
   agent any
+  parameters {
+    string(name: 'AWS_ACCOUNT_ID', defaultValue: '464868388928', description: 'AWS account id')
+    string(name: 'ECR_REPO', defaultValue: 'dynamodb-demo', description: 'ECR repository name')
+    string(name: 'CLUSTER_NAME', defaultValue: 'dynamodb-demo-cluster', description: 'ECS cluster name')
+    string(name: 'SERVICE_NAME', defaultValue: 'dynamodb-demo-service', description: 'ECS service name')
+    string(name: 'TASK_FAMILY', defaultValue: 'dynamodb-demo-task', description: 'ECS task family')
+    string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag')
+  }
   environment {
     AWS_REGION = "us-east-1"
-    AWS_ACCOUNT_ID = "${env.AWS_ACCOUNT_ID}"
-    ECR_REPO = "${env.ECR_REPO}"
-    IMAGE_TAG = "${env.IMAGE_TAG ?: "${env.BUILD_NUMBER}"}"
-    CLUSTER_NAME = "${env.CLUSTER_NAME}"
-    SERVICE_NAME = "${env.SERVICE_NAME}"
-    TASK_FAMILY = "${env.TASK_FAMILY}"
+    AWS_ACCOUNT_ID = "${params.AWS_ACCOUNT_ID}"
+    ECR_REPO = "${params.ECR_REPO}"
+    IMAGE_TAG = "${params.IMAGE_TAG}"
+    CLUSTER_NAME = "${params.CLUSTER_NAME}"
+    SERVICE_NAME = "${params.SERVICE_NAME}"
+    TASK_FAMILY = "${params.TASK_FAMILY}"
   }
   stages {
     stage('Checkout') {
