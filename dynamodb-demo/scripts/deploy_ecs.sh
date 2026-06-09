@@ -12,7 +12,7 @@ IMAGE_URI=${AWS_ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO}:${IM
 
 echo "Preparing task definition from template"
 TMPDEF=$(mktemp /tmp/taskdef.XXXX.json)
-sed "s|{{IMAGE_URI}}|${IMAGE_URI}|g; s|{{TASK_FAMILY}}|${TASK_FAMILY}|g" ecs/task-definition.json.template > ${TMPDEF}
+sed "s|{{IMAGE_URI}}|${IMAGE_URI}|g; s|{{TASK_FAMILY}}|${TASK_FAMILY}|g; s|{{AWS_ACCOUNT_ID}}|${AWS_ACCOUNT_ID}|g" ecs/task-definition.json.template > ${TMPDEF}
 
 echo "Registering task definition"
 aws ecs register-task-definition --cli-input-json file://${TMPDEF} --region ${AWS_REGION}
