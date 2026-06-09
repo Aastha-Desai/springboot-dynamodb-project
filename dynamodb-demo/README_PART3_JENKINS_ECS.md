@@ -143,6 +143,9 @@ Paste that into Jenkins, then install the suggested plugins.
   - `docker`
   - `aws`
   - network access to AWS
+  - If Jenkins itself runs in Docker, the container image must include both CLIs or you must use a separate agent/VM that has them installed.
+  - If you keep Jenkins in Docker, also mount the host Docker socket so the pipeline can build images.
+  - The error `command not found` means the tool is missing from the Jenkins runtime, not from your project repo.
 
 9. Run the pipeline:
   - Open the Jenkins job
