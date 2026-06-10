@@ -53,5 +53,14 @@ pipeline {
         }
       }
     }
+    stage('Monitor ECS') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          dir('dynamodb-demo') {
+            sh 'python3 agent/ecs_monitor_agent.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit --once'
+          }
+        }
+      }
+    }
   }
 }

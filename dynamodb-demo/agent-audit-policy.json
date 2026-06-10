@@ -11,10 +11,7 @@
         "dynamodb:GetItem",
         "dynamodb:Scan"
       ],
-      "Resource": [
-        "arn:aws:dynamodb:us-east-1:464868388928:table/EmployeeTable",
-        "arn:aws:dynamodb:us-east-1:464868388928:table/AgentAudit"
-      ]
+      "Resource": "arn:aws:dynamodb:us-east-1:464868388928:table/AgentAudit"
     }
   ]
 }
