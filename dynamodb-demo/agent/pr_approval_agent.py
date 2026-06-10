@@ -209,6 +209,13 @@ def pr_fallback_url(owner: str, repo: str, branch: str) -> str:
     return f"https://github.com/{owner}/{repo}/pull/new/{branch}"
 
 
+def resolve_github_repo(repo_dir: pathlib.Path, remote: str, explicit_repo: str) -> tuple[str, str]:
+    if explicit_repo:
+        owner, repo = explicit_repo.split("/", 1)
+        return owner, repo
+    return parse_github_remote(remote_url(repo_dir, remote))
+
+
 def email_body(project: str, pr_url: str, summary: str) -> str:
     return (
         f"Human approval requested for {project}.\n\n"
@@ -218,7 +225,7 @@ def email_body(project: str, pr_url: str, summary: str) -> str:
     )
 
 
-def send_email(subject: str, body: str, dry_run: bool, outbox: pathlib.Path) -> bool:
+def send_email(subject: str, body: str, email_mode: str, dry_run: bool, outbox: pathlib.Path) -> bool:
     to_address = os.getenv("APPROVAL_EMAIL_TO", "").strip()
     from_address = os.getenv("EMAIL_FROM", os.getenv("SMTP_USERNAME", "")).strip()
     smtp_host = os.getenv("SMTP_HOST", "").strip()
@@ -226,7 +233,14 @@ def send_email(subject: str, body: str, dry_run: bool, outbox: pathlib.Path) -> 
     smtp_username = os.getenv("SMTP_USERNAME", "").strip()
     smtp_password = os.getenv("SMTP_PASSWORD", "")
 
-    if dry_run or not (to_address and from_address and smtp_host):
+    smtp_ready = bool(to_address and from_address and smtp_host)
+    if email_mode == "smtp" and not smtp_ready:
+        raise RuntimeError(
+            "SMTP email is required but not configured. Set APPROVAL_EMAIL_TO, EMAIL_FROM or SMTP_USERNAME, "
+            "SMTP_HOST, SMTP_PORT, SMTP_USERNAME, and SMTP_PASSWORD."
+        )
+
+    if dry_run or email_mode == "preview" or not smtp_ready:
         outbox.parent.mkdir(parents=True, exist_ok=True)
         outbox.write_text(f"To: {to_address or '<APPROVAL_EMAIL_TO>'}\nSubject: {subject}\n\n{body}")
         print(f"Email notification preview written to {outbox}")
@@ -257,7 +271,7 @@ def main(args: argparse.Namespace) -> int:
     committed = commit_changes(repo_dir, args.paths, args.commit_message, args.dry_run)
     push_branch(repo_dir, args.remote, branch, args.dry_run)
 
-    owner, repo = parse_github_remote(remote_url(repo_dir, args.remote))
+    owner, repo = resolve_github_repo(repo_dir, args.remote, args.github_repo)
     token = os.getenv("GITHUB_TOKEN", os.getenv("GH_TOKEN", "")).strip()
     pr_url = ""
     if args.dry_run:
@@ -266,7 +280,7 @@ def main(args: argparse.Namespace) -> int:
     elif token:
         pr_url = create_github_pr(owner, repo, branch, args.base_branch, args.pr_title, args.pr_body, token)
         print(f"Pull request ready: {pr_url}")
-        audit(args.region, args.audit_table, "PR_CREATED", "WAITING_FOR_HUMAN_APPROVAL", pr_url, pr_url)
+        audit(args.region, args.audit_table, "PR_CREATED", "WAITING_FOR_HUMAN_APPROVAL", pr_url, pr_url, dry_run=args.skip_audit)
     else:
         pr_url = pr_fallback_url(owner, repo, branch)
         print("GITHUB_TOKEN/GH_TOKEN is not set, so the agent could not create the PR through the API.")
@@ -279,11 +293,11 @@ def main(args: argparse.Namespace) -> int:
             f"Set GITHUB_TOKEN/GH_TOKEN or create PR manually: {pr_url}",
             pr_url,
             severity="HIGH",
-            dry_run=args.dry_run,
+            dry_run=args.dry_run or args.skip_audit,
         )
 
     body = email_body(args.project_name, pr_url, args.summary)
-    email_sent = send_email(args.email_subject, body, args.dry_run, repo_dir / args.outbox_file)
+    email_sent = send_email(args.email_subject, body, args.email_mode, args.dry_run, repo_dir / args.outbox_file)
     audit(
         args.region,
         args.audit_table,
@@ -291,7 +305,7 @@ def main(args: argparse.Namespace) -> int:
         "SENT" if email_sent else "SMTP_CONFIGURATION_REQUIRED",
         f"Human approval notification {'sent' if email_sent else 'prepared'} for {pr_url}",
         pr_url,
-        dry_run=args.dry_run,
+        dry_run=args.dry_run or args.skip_audit,
     )
 
     if committed:
@@ -302,17 +316,36 @@ def main(args: argparse.Namespace) -> int:
             "WAITING_FOR_HUMAN_APPROVAL",
             f"Committed fix branch {branch}",
             branch,
-            dry_run=args.dry_run,
+            dry_run=args.dry_run or args.skip_audit,
         )
     return 0
 
 
+def load_config(path: str) -> dict[str, Any]:
+    if not path:
+        return {}
+    config_path = pathlib.Path(path).expanduser().resolve()
+    with config_path.open() as file:
+        return json.load(file)
+
+
+def normalize_config_keys(config: dict[str, Any]) -> dict[str, Any]:
+    return {key.replace("-", "_"): value for key, value in config.items()}
+
+
 def parse_args() -> argparse.Namespace:
+    pre_parser = argparse.ArgumentParser(add_help=False)
+    pre_parser.add_argument("--config", default="", help="Optional JSON config file for reusable project settings.")
+    pre_args, remaining = pre_parser.parse_known_args()
+    config = normalize_config_keys(load_config(pre_args.config))
+
     parser = argparse.ArgumentParser(description="Raise PR and notify human approval for agent fixes.")
+    parser.add_argument("--config", default=pre_args.config, help="Optional JSON config file for reusable project settings.")
     parser.add_argument("--repo-dir", default="..", help="Git repository root when running from dynamodb-demo.")
     parser.add_argument("--branch", default="", help="Fix branch name. Defaults to agent-fix timestamp.")
     parser.add_argument("--base-branch", default="main")
     parser.add_argument("--remote", default="origin")
+    parser.add_argument("--github-repo", default="", help="GitHub owner/repo override, useful when push remote is not GitHub.")
     parser.add_argument("--paths", nargs="*", default=[], help="Paths to stage. Defaults to all changes.")
     parser.add_argument("--commit-message", default="fix: apply agent-generated bug fix")
     parser.add_argument("--pr-title", default="Agent generated bug fix")
@@ -320,11 +353,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--project-name", default="springboot-dynamodb-project")
     parser.add_argument("--summary", default="The agent generated a bug fix and requests human approval.")
     parser.add_argument("--email-subject", default="Human approval requested for agent bug fix")
+    parser.add_argument(
+        "--email-mode",
+        choices=("auto", "smtp", "preview"),
+        default="auto",
+        help="auto sends SMTP when configured and otherwise writes preview; smtp requires real email; preview never sends.",
+    )
     parser.add_argument("--outbox-file", default="build/approval-email.txt")
     parser.add_argument("--region", default="us-east-1")
     parser.add_argument("--audit-table", default="AgentAudit")
+    parser.add_argument("--skip-audit", action="store_true", help="Do not write audit records, useful for local tests.")
     parser.add_argument("--dry-run", action="store_true")
-    return parser.parse_args()
+    parser.set_defaults(**config)
+    return parser.parse_args(remaining)
 
 
 if __name__ == "__main__":

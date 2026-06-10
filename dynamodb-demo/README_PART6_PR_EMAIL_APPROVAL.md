@@ -10,6 +10,7 @@ This part adds an agent that raises a pull request for an automatic fix and noti
 - Creates a GitHub pull request when `GITHUB_TOKEN` is configured.
 - Sends an email notification when SMTP settings are configured.
 - Writes approval events to `AgentAudit`.
+- Accepts a JSON config file so the same agent can run against another repository.
 
 ## Required for real PR creation
 
@@ -34,13 +35,35 @@ export SMTP_USERNAME=your-email@example.com
 export SMTP_PASSWORD=<app-password>
 ```
 
-Without SMTP settings, the agent writes an approval email preview to:
+The real assignment/demo should use SMTP mode:
+
+```bash
+--email-mode smtp
+```
+
+In `smtp` mode, the agent fails if email cannot be sent. Without SMTP settings in default `auto` mode, the agent writes an approval email preview to:
 
 ```text
 build/approval-email.txt
 ```
 
 That preview is enough for a local demo, but a real email requires the SMTP variables above.
+
+## Reusable config file
+
+Copy and edit:
+
+```bash
+cp agent/project-config.example.json agent/project-config.local.json
+```
+
+Then run the same agent against any Git repo:
+
+```bash
+python3 agent/pr_approval_agent.py --config agent/project-config.local.json
+```
+
+The target repo, GitHub repo, changed paths, branch, PR text, and email mode all come from the config file.
 
 ## End-to-end test with a simulated bug
 
@@ -65,7 +88,8 @@ python3 agent/pr_approval_agent.py \
   --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java \
   --commit-message "fix: restore employee id validation" \
   --pr-title "Agent fix: restore employeeId validation" \
-  --summary "The auto-fix agent restored @Size(max = 20) validation for employeeId."
+  --summary "The auto-fix agent restored @Size(max = 20) validation for employeeId." \
+  --email-mode smtp
 ```
 
 If `GITHUB_TOKEN` and SMTP settings are configured, this creates a real PR and sends a real email.
@@ -82,6 +106,16 @@ python3 agent/pr_approval_agent.py \
   --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java \
   --dry-run
 ```
+
+## Local integration test
+
+This checks the generic branch/commit/approval-notification flow without using the real GitHub repo:
+
+```bash
+python3 agent/test_pr_approval_agent.py
+```
+
+This proves the agent can run against another repository shape because it creates a temporary Git repo, commits a generic file change, pushes a branch to a temporary bare remote, prepares a PR URL, and writes the approval email preview.
 
 ## Real run after an auto-fix
 
