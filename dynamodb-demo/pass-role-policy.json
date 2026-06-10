@@ -4,7 +4,10 @@
     {
       "Effect": "Allow",
       "Action": "iam:PassRole",
-      "Resource": "arn:aws:iam::464868388928:role/ecsTaskExecutionRole"
+      "Resource": [
+        "arn:aws:iam::464868388928:role/ecsTaskExecutionRole",
+        "arn:aws:iam::464868388928:role/dynamodbDemoTaskRole"
+      ]
     }
   ]
 }

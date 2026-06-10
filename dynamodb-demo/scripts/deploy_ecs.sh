@@ -15,9 +15,24 @@ TMPDEF=$(mktemp /tmp/taskdef.XXXX.json)
 sed "s|{{IMAGE_URI}}|${IMAGE_URI}|g; s|{{TASK_FAMILY}}|${TASK_FAMILY}|g; s|{{AWS_ACCOUNT_ID}}|${AWS_ACCOUNT_ID}|g" ecs/task-definition.json.template > ${TMPDEF}
 
 echo "Registering task definition"
-aws ecs register-task-definition --cli-input-json file://${TMPDEF} --region ${AWS_REGION}
+TASK_DEFINITION_ARN=$(aws ecs register-task-definition \
+  --cli-input-json file://${TMPDEF} \
+  --region ${AWS_REGION} \
+  --query 'taskDefinition.taskDefinitionArn' \
+  --output text)
 
 echo "Updating service to use new task definition"
-aws ecs update-service --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --force-new-deployment --region ${AWS_REGION}
+aws ecs update-service \
+  --cluster ${CLUSTER_NAME} \
+  --service ${SERVICE_NAME} \
+  --task-definition ${TASK_DEFINITION_ARN} \
+  --force-new-deployment \
+  --region ${AWS_REGION}
+
+echo "Waiting for ECS service to become stable"
+aws ecs wait services-stable \
+  --cluster ${CLUSTER_NAME} \
+  --services ${SERVICE_NAME} \
+  --region ${AWS_REGION}
 
 rm -f ${TMPDEF}
