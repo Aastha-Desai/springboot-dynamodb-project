@@ -13,7 +13,6 @@ pipeline {
     AWS_REGION = "us-east-1"
     AWS_ACCOUNT_ID = "${params.AWS_ACCOUNT_ID}"
     ECR_REPO = "${params.ECR_REPO}"
-    EFFECTIVE_IMAGE_TAG = ""
     CLUSTER_NAME = "${params.CLUSTER_NAME}"
     SERVICE_NAME = "${params.SERVICE_NAME}"
     TASK_FAMILY = "${params.TASK_FAMILY}"
@@ -25,11 +24,14 @@ pipeline {
     }
     stage('Set Image Tag') {
       steps {
-        script {
-          def requestedImageTag = params.IMAGE_TAG ? params.IMAGE_TAG.trim() : ''
-          env.EFFECTIVE_IMAGE_TAG = requestedImageTag ? requestedImageTag : "build-${currentBuild.number}"
-          echo "Docker image tag for this deployment: ${env.EFFECTIVE_IMAGE_TAG}"
-        }
+        sh '''
+          EFFECTIVE_IMAGE_TAG="${IMAGE_TAG:-}"
+          if [ -z "${EFFECTIVE_IMAGE_TAG}" ] || [ "${EFFECTIVE_IMAGE_TAG}" = "null" ]; then
+            EFFECTIVE_IMAGE_TAG="build-${BUILD_NUMBER}"
+          fi
+          echo "${EFFECTIVE_IMAGE_TAG}" > .effective-image-tag
+          echo "Docker image tag for this deployment: ${EFFECTIVE_IMAGE_TAG}"
+        '''
       }
     }
     stage('Build') {
@@ -50,7 +52,10 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('dynamodb-demo') {
-            sh './scripts/ecr_login_and_push.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${ECR_REPO} ${EFFECTIVE_IMAGE_TAG}'
+            sh '''
+              EFFECTIVE_IMAGE_TAG="$(cat ../.effective-image-tag)"
+              ./scripts/ecr_login_and_push.sh "${AWS_ACCOUNT_ID}" "${AWS_REGION}" "${ECR_REPO}" "${EFFECTIVE_IMAGE_TAG}"
+            '''
           }
         }
       }
@@ -72,7 +77,10 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('dynamodb-demo') {
-            sh './scripts/deploy_ecs.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${CLUSTER_NAME} ${SERVICE_NAME} ${TASK_FAMILY} ${ECR_REPO} ${EFFECTIVE_IMAGE_TAG}'
+            sh '''
+              EFFECTIVE_IMAGE_TAG="$(cat ../.effective-image-tag)"
+              ./scripts/deploy_ecs.sh "${AWS_ACCOUNT_ID}" "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${TASK_FAMILY}" "${ECR_REPO}" "${EFFECTIVE_IMAGE_TAG}"
+            '''
           }
         }
       }
