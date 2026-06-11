@@ -85,6 +85,8 @@ def http_request(url: str, method: str = "GET", payload: dict[str, Any] | None =
             return response.status, response.read().decode("utf-8")
     except urllib.error.HTTPError as exc:
         return exc.code, exc.read().decode("utf-8", errors="replace")
+    except urllib.error.URLError as exc:
+        return 0, str(exc.reason)
 
 
 def first_detail_value(details: list[dict[str, str]], name: str) -> str:
@@ -171,6 +173,9 @@ def main(args: argparse.Namespace) -> int:
     )
     print(f"[{utc_now()}] Validating ECS deployment at {base_url}")
     failures = validate(base_url)
+    if args.force_fail:
+        failures.append("Forced validation failure requested for rollback test.")
+
     if failures:
         message = "Deployment validation failed: " + " | ".join(failures)
         print(message)
@@ -192,6 +197,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--base-url", default="", help="Optional explicit app URL. If omitted, resolve ECS task public IP.")
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--skip-audit", action="store_true")
+    parser.add_argument("--force-fail", action="store_true", help="Force validation failure to test ECS rollback.")
     return parser.parse_args()
 
 
