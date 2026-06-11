@@ -63,13 +63,22 @@ pipeline {
     stage('Capture Current ECS Version') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          script {
-            env.PREVIOUS_TASK_DEFINITION = sh(
-              script: 'aws ecs describe-services --cluster ${CLUSTER_NAME} --services ${SERVICE_NAME} --region ${AWS_REGION} --query "services[0].taskDefinition" --output text',
-              returnStdout: true
-            ).trim()
-            echo "Previous ECS task definition: ${env.PREVIOUS_TASK_DEFINITION}"
-          }
+          sh '''
+            PREVIOUS_TASK_DEFINITION="$(aws ecs describe-services \
+              --cluster "${CLUSTER_NAME}" \
+              --services "${SERVICE_NAME}" \
+              --region "${AWS_REGION}" \
+              --query 'services[0].deployments[?status==`PRIMARY`].taskDefinition | [0]' \
+              --output text)"
+
+            if [ -z "${PREVIOUS_TASK_DEFINITION}" ] || [ "${PREVIOUS_TASK_DEFINITION}" = "None" ] || [ "${PREVIOUS_TASK_DEFINITION}" = "null" ]; then
+              echo "Could not capture previous ECS task definition for ${CLUSTER_NAME}/${SERVICE_NAME}." >&2
+              exit 2
+            fi
+
+            echo "${PREVIOUS_TASK_DEFINITION}" > .previous-task-definition
+            echo "Previous ECS task definition: ${PREVIOUS_TASK_DEFINITION}"
+          '''
         }
       }
     }
@@ -97,10 +106,13 @@ pipeline {
               try {
                 sh validationCommand
               } catch (validationError) {
-                echo "Deployment validation failed. Rolling back ECS service to ${env.PREVIOUS_TASK_DEFINITION}."
-                sh './scripts/rollback_ecs.sh ${AWS_REGION} ${CLUSTER_NAME} ${SERVICE_NAME} ${PREVIOUS_TASK_DEFINITION} AgentAudit'
+                echo "Deployment validation failed. Rolling back ECS service to the captured previous task definition."
+                sh '''
+                  PREVIOUS_TASK_DEFINITION="$(cat ../.previous-task-definition)"
+                  ./scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" AgentAudit
+                '''
                 sh 'python3 agent/validate_ecs_deployment.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
-                error "Deployment validation failed; ECS was rolled back to ${env.PREVIOUS_TASK_DEFINITION}."
+                error "Deployment validation failed; ECS was rolled back to the captured previous task definition."
               }
             }
           }
