@@ -5,7 +5,7 @@ export AWS_PAGER=""
 AWS_REGION=$1
 CLUSTER_NAME=$2
 SERVICE_NAME=$3
-PREVIOUS_TASK_DEFINITION=$4
+PREVIOUS_TASK_DEFINITION=${4:-}
 AUDIT_TABLE=${5:-AgentAudit}
 
 aws_retry() {
@@ -50,8 +50,13 @@ audit_rollback() {
     }"
 }
 
-if [ -z "${PREVIOUS_TASK_DEFINITION}" ] || [ "${PREVIOUS_TASK_DEFINITION}" = "None" ]; then
+if [ -z "${PREVIOUS_TASK_DEFINITION}" ] || [ "${PREVIOUS_TASK_DEFINITION}" = "None" ] || [ "${PREVIOUS_TASK_DEFINITION}" = "null" ]; then
   echo "Previous task definition is empty; refusing rollback." >&2
+  exit 2
+fi
+
+if [[ "${PREVIOUS_TASK_DEFINITION}" != arn:aws:ecs:*:task-definition/* ]]; then
+  echo "Previous task definition must be an ECS task definition ARN, got: ${PREVIOUS_TASK_DEFINITION}" >&2
   exit 2
 fi
 
