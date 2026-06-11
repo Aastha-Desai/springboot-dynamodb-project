@@ -6,20 +6,30 @@ pipeline {
     string(name: 'CLUSTER_NAME', defaultValue: 'dynamodb-demo-cluster', description: 'ECS cluster name')
     string(name: 'SERVICE_NAME', defaultValue: 'dynamodb-demo-service', description: 'ECS service name')
     string(name: 'TASK_FAMILY', defaultValue: 'dynamodb-demo-task', description: 'ECS task family')
-    string(name: 'IMAGE_TAG', defaultValue: 'latest', description: 'Docker image tag')
+    string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional Docker image tag. Leave blank to use a build-specific immutable tag.')
+    booleanParam(name: 'FORCE_VALIDATION_FAILURE', defaultValue: false, description: 'Demo/test Part 8 rollback by forcing deployment validation to fail')
   }
   environment {
     AWS_REGION = "us-east-1"
     AWS_ACCOUNT_ID = "${params.AWS_ACCOUNT_ID}"
     ECR_REPO = "${params.ECR_REPO}"
-    IMAGE_TAG = "${params.IMAGE_TAG}"
+    EFFECTIVE_IMAGE_TAG = ""
     CLUSTER_NAME = "${params.CLUSTER_NAME}"
     SERVICE_NAME = "${params.SERVICE_NAME}"
     TASK_FAMILY = "${params.TASK_FAMILY}"
+    PREVIOUS_TASK_DEFINITION = ""
   }
   stages {
     stage('Checkout') {
       steps { checkout scm }
+    }
+    stage('Set Image Tag') {
+      steps {
+        script {
+          env.EFFECTIVE_IMAGE_TAG = params.IMAGE_TAG?.trim() ? params.IMAGE_TAG.trim() : "build-${env.BUILD_NUMBER}"
+          echo "Docker image tag for this deployment: ${env.EFFECTIVE_IMAGE_TAG}"
+        }
+      }
     }
     stage('Build') {
       steps {
@@ -39,7 +49,20 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('dynamodb-demo') {
-            sh "./scripts/ecr_login_and_push.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${ECR_REPO} ${IMAGE_TAG}"
+            sh "./scripts/ecr_login_and_push.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${ECR_REPO} ${EFFECTIVE_IMAGE_TAG}"
+          }
+        }
+      }
+    }
+    stage('Capture Current ECS Version') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          script {
+            env.PREVIOUS_TASK_DEFINITION = sh(
+              script: 'aws ecs describe-services --cluster ${CLUSTER_NAME} --services ${SERVICE_NAME} --region ${AWS_REGION} --query "services[0].taskDefinition" --output text',
+              returnStdout: true
+            ).trim()
+            echo "Previous ECS task definition: ${env.PREVIOUS_TASK_DEFINITION}"
           }
         }
       }
@@ -48,7 +71,7 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('dynamodb-demo') {
-            sh "./scripts/deploy_ecs.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${CLUSTER_NAME} ${SERVICE_NAME} ${TASK_FAMILY} ${ECR_REPO} ${IMAGE_TAG}"
+            sh "./scripts/deploy_ecs.sh ${AWS_ACCOUNT_ID} ${AWS_REGION} ${CLUSTER_NAME} ${SERVICE_NAME} ${TASK_FAMILY} ${ECR_REPO} ${EFFECTIVE_IMAGE_TAG}"
           }
         }
       }
@@ -57,7 +80,17 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('dynamodb-demo') {
-            sh 'python3 agent/validate_ecs_deployment.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
+            script {
+              def forcedFailureArg = params.FORCE_VALIDATION_FAILURE ? '--force-fail' : ''
+              try {
+                sh "python3 agent/validate_ecs_deployment.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit ${forcedFailureArg}"
+              } catch (validationError) {
+                echo "Deployment validation failed. Rolling back ECS service to ${env.PREVIOUS_TASK_DEFINITION}."
+                sh './scripts/rollback_ecs.sh ${AWS_REGION} ${CLUSTER_NAME} ${SERVICE_NAME} ${PREVIOUS_TASK_DEFINITION} AgentAudit'
+                sh 'python3 agent/validate_ecs_deployment.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
+                error "Deployment validation failed; ECS was rolled back to ${env.PREVIOUS_TASK_DEFINITION}."
+              }
+            }
           }
         }
       }
