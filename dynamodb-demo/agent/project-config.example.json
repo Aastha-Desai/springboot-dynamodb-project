@@ -1,11 +1,17 @@
 {
   "repo_dir": "/path/to/target/repo",
+  "project_dir": "/path/to/target/repo/path-to-spring-project",
+  "cluster": "my-ecs-cluster",
+  "service": "my-ecs-service",
+  "audit_table": "AgentAudit",
+  "base_url": "",
+  "resolve_ecs_url": true,
   "remote": "origin",
   "github_repo": "owner/repo",
   "base_branch": "main",
-  "branch": "agent-fix-validation",
+  "fix_branch": "agent-fix-validation",
   "paths": [
-    "src/main/java/com/example/Employee.java"
+    "path-to-spring-project/src/main/java/com/example/Employee.java"
   ],
   "commit_message": "fix: apply agent-generated bug fix",
   "pr_title": "Agent generated bug fix",
@@ -15,6 +21,5 @@
   "email_subject": "Human approval requested for agent bug fix",
   "email_mode": "smtp",
   "outbox_file": "build/approval-email.txt",
-  "region": "us-east-1",
-  "audit_table": "AgentAudit"
+  "region": "us-east-1"
 }
