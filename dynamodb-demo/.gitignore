@@ -1,6 +1,8 @@
 HELP.md
 target/
 .DS_Store
+__pycache__/
+*.py[cod]
 .mvn/wrapper/maven-wrapper.jar
 !**/src/main/**/target/
 !**/src/test/**/target/
