@@ -19,9 +19,10 @@ The agent workflow adds automation around bug handling:
 
 ## Tech Stack
 
-- Java 21
+- Java 17+
 - Spring Boot
 - DynamoDB
+- H2 for local/test runs
 - Swagger/OpenAPI
 - Docker
 - Amazon ECR
@@ -101,12 +102,14 @@ Do not commit these values.
 
 ## Run The App Locally
 
+The `local` Spring profile uses an in-memory H2 database, so you can run and test the API without AWS or local DynamoDB.
+
 From the project root:
 
 ```bash
 cd dynamodb-demo
 ./mvnw test
-./mvnw spring-boot:run
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 Swagger UI:
@@ -119,6 +122,18 @@ OpenAPI JSON:
 
 ```text
 http://localhost:8080/v3/api-docs
+```
+
+Local H2 console:
+
+```text
+http://localhost:8080/h2-console
+```
+
+Use this JDBC URL:
+
+```text
+jdbc:h2:mem:employees-local
 ```
 
 ## Run The Coordinated Agent Workflow
