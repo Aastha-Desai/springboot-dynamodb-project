@@ -8,10 +8,10 @@ The application exposes employee APIs that accept JSON payloads and store employ
 
 The agent workflow adds automation around bug handling:
 
-1. `ecs_monitor_agent.py` monitors ECS service/task health and audits bugs.
-2. `auto_fix_agent.py` applies a known validation fix, such as restoring `@Size(max = 20)` for `employeeId`.
-3. `pr_approval_agent.py` creates a GitHub PR and sends an email notification for human approval.
-4. `orchestrator.py` runs the monitor, auto-fix, PR, and email agents as one coordinated workflow.
+1. `JavaEcsMonitorAgent` monitors ECS service/task health and audits bugs.
+2. `JavaAutoFixAgent` applies a known validation fix, such as restoring `@Size(max = 20)` for `employeeId`.
+3. `JavaPrApprovalAgent` creates a GitHub PR and sends an email notification for human approval.
+4. `JavaOrchestratorAgent` runs the monitor, auto-fix, PR, and email agents as one coordinated workflow.
 5. Jenkins deploys merged/approved changes to ECS.
 6. `validate_ecs_deployment.py` validates Swagger, employee POST/GET, and invalid `employeeId` handling.
 7. `rollback_ecs.sh` restores the previous ECS task definition if validation fails.
@@ -28,7 +28,7 @@ The agent workflow adds automation around bug handling:
 - Amazon ECR
 - Amazon ECS Fargate
 - Jenkins
-- Python agent scripts
+- Java command-line agents
 - GitHub PR API
 - SMTP email notification
 
@@ -37,7 +37,8 @@ The agent workflow adds automation around bug handling:
 ```text
 dynamodb-demo/
   src/main/java/...          Spring Boot application
-  agent/                     ECS monitor, auto-fix, PR/email, validation, orchestrator agents
+  src/main/java/.../agent/   Java ECS monitor, auto-fix, PR/email, and orchestrator agents
+  agent/                     Legacy Python reference scripts
   scripts/                   ECR push, ECS deploy, ECS rollback scripts
   ecs/                       ECS task definition template
   Jenkinsfile                Build, deploy, validate, rollback pipeline
@@ -136,30 +137,33 @@ Use this JDBC URL:
 jdbc:h2:mem:employees-local
 ```
 
-## Run The Coordinated Agent Workflow
+## Run The Java Coordinated Agent Workflow
 
 The main automation entry point is:
 
 ```bash
 cd dynamodb-demo
 
-python3 agent/orchestrator.py \
+./mvnw -q exec:java \
+  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
+  -Dexec.args='\
   --email-mode smtp \
   --fix-branch agent-auto-fix \
   --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java \
   --pr-title "Agent fix: restore employee validation" \
-  --summary "The orchestrator detected a validation issue, applied an auto-fix, created a PR, and emailed human approval."
+  --summary "The Java orchestrator detected a validation issue, applied an auto-fix, created a PR, and emailed human approval."'
 ```
 
 For a local/demo run without ECS monitoring:
 
 ```bash
-python3 agent/orchestrator.py \
+./mvnw -q exec:java \
+  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
+  -Dexec.args='\
   --skip-monitor \
-  --no-resolve-ecs-url \
   --email-mode smtp \
   --fix-branch agent-auto-fix \
-  --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java
+  --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java'
 ```
 
 What it does:
@@ -203,15 +207,16 @@ Run the orchestrator:
 ```bash
 cd dynamodb-demo
 
-python3 agent/orchestrator.py \
+./mvnw -q exec:java \
+  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
+  -Dexec.args='\
   --skip-monitor \
-  --no-resolve-ecs-url \
   --email-mode smtp \
   --base-branch orchestrator-bug-base-test \
   --fix-branch orchestrator-validation-fix-test \
   --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java \
   --pr-title "Agent orchestrator fix: restore employeeId validation" \
-  --summary "The orchestrator detected the missing employeeId validation, auto-fixed it, created a PR, and emailed human approval."
+  --summary "The Java orchestrator detected the missing employeeId validation, auto-fixed it, created a PR, and emailed human approval."'
 ```
 
 Expected result:
