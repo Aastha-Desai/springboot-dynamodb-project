@@ -99,9 +99,9 @@ pipeline {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('dynamodb-demo') {
             script {
-              def validationCommand = 'python3 agent/validate_ecs_deployment.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
+              def validationCommand = './mvnw -q exec:java -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaValidateEcsDeploymentAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit"'
               if (params.FORCE_VALIDATION_FAILURE) {
-                validationCommand = "${validationCommand} --force-fail"
+                validationCommand = './mvnw -q exec:java -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaValidateEcsDeploymentAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit --force-fail"'
               }
               try {
                 sh validationCommand
@@ -111,7 +111,7 @@ pipeline {
                   PREVIOUS_TASK_DEFINITION="$(cat ../.previous-task-definition)"
                   ./scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" AgentAudit
                 '''
-                sh 'python3 agent/validate_ecs_deployment.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
+                sh './mvnw -q exec:java -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaValidateEcsDeploymentAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit"'
                 error "Deployment validation failed; ECS was rolled back to the captured previous task definition."
               }
             }
@@ -123,7 +123,7 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('dynamodb-demo') {
-            sh 'python3 agent/ecs_monitor_agent.py --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit --once'
+            sh './mvnw -q exec:java -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaEcsMonitorAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit"'
           }
         }
       }

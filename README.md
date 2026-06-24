@@ -13,7 +13,7 @@ The agent workflow adds automation around bug handling:
 3. `JavaPrApprovalAgent` creates a GitHub PR and sends an email notification for human approval.
 4. `JavaOrchestratorAgent` runs the monitor, auto-fix, PR, and email agents as one coordinated workflow.
 5. Jenkins deploys merged/approved changes to ECS.
-6. `validate_ecs_deployment.py` validates Swagger, employee POST/GET, and invalid `employeeId` handling.
+6. `JavaValidateEcsDeploymentAgent` validates Swagger, employee POST/GET, and invalid `employeeId` handling.
 7. `rollback_ecs.sh` restores the previous ECS task definition if validation fails.
 8. Agent and deployment actions are audited in DynamoDB table `AgentAudit`.
 
@@ -37,8 +37,7 @@ The agent workflow adds automation around bug handling:
 ```text
 dynamodb-demo/
   src/main/java/...          Spring Boot application
-  src/main/java/.../agent/   Java ECS monitor, auto-fix, PR/email, and orchestrator agents
-  agent/                     Legacy Python reference scripts
+  src/main/java/.../agent/   Java ECS monitor, auto-fix, PR/email, validation, and orchestrator agents
   scripts/                   ECR push, ECS deploy, ECS rollback scripts
   ecs/                       ECS task definition template
   Jenkinsfile                Build, deploy, validate, rollback pipeline
@@ -313,13 +312,7 @@ DEPLOYMENT_ROLLED_BACK
 
 ## Reuse On Another Repository
 
-Copy and edit:
-
-```bash
-cp dynamodb-demo/agent/project-config.example.json project-config.local.json
-```
-
-Update:
+The Java agents are configured with command-line arguments and environment variables, so another repository can reuse the same workflow by changing:
 
 - `repo_dir`
 - `project_dir`
@@ -328,13 +321,15 @@ Update:
 - `service`
 - `paths`
 - PR title/body/summary
-- email mode
+- email mode and SMTP/GitHub token environment variables
 
-Then run:
+Example:
 
 ```bash
 cd dynamodb-demo
-python3 agent/orchestrator.py --config ../project-config.local.json
+./mvnw -q exec:java \
+  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
+  -Dexec.args='--project-dir . --repo-dir .. --github-repo owner/repo --cluster your-cluster --service your-service --paths path/to/Employee.java --email-mode smtp'
 ```
 
 The new repository owner must provide their own `GITHUB_TOKEN` and SMTP/email environment variables.
