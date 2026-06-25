@@ -7,6 +7,8 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Profile;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 
 @Repository
@@ -14,10 +16,13 @@ import org.springframework.stereotype.Repository;
 @RequiredArgsConstructor
 public class JdbcEmployeeRepository implements EmployeeRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(JdbcEmployeeRepository.class);
+
     private final JdbcTemplate jdbcTemplate;
 
     @PostConstruct
     void createTable() {
+        log.info("Initializing local/test H2 employees table");
         jdbcTemplate.execute("""
                 CREATE TABLE IF NOT EXISTS employees (
                     employee_id VARCHAR(20) PRIMARY KEY,
@@ -29,6 +34,7 @@ public class JdbcEmployeeRepository implements EmployeeRepository {
 
     @Override
     public void save(Employee employee) {
+        log.debug("Saving employeeId={} to H2 employees table", employee.getEmployeeId());
         jdbcTemplate.update("""
                         MERGE INTO employees (employee_id, name, department)
                         KEY(employee_id)
@@ -37,10 +43,12 @@ public class JdbcEmployeeRepository implements EmployeeRepository {
                 employee.getEmployeeId(),
                 employee.getName(),
                 employee.getDepartment());
+        log.info("Saved employeeId={} to H2 employees table", employee.getEmployeeId());
     }
 
     @Override
     public Optional<Employee> findById(String employeeId) {
+        log.debug("Reading employeeId={} from H2 employees table", employeeId);
         List<Employee> employees = jdbcTemplate.query(
                 "SELECT employee_id, name, department FROM employees WHERE employee_id = ?",
                 (rs, rowNum) -> new Employee(
@@ -48,16 +56,20 @@ public class JdbcEmployeeRepository implements EmployeeRepository {
                         rs.getString("name"),
                         rs.getString("department")),
                 employeeId);
+        log.debug("H2 lookup result for employeeId={} found={}", employeeId, !employees.isEmpty());
         return employees.stream().findFirst();
     }
 
     @Override
     public List<Employee> findAll() {
-        return jdbcTemplate.query(
+        log.debug("Listing employees from H2 employees table");
+        List<Employee> employees = jdbcTemplate.query(
                 "SELECT employee_id, name, department FROM employees ORDER BY employee_id",
                 (rs, rowNum) -> new Employee(
                         rs.getString("employee_id"),
                         rs.getString("name"),
                         rs.getString("department")));
+        log.info("Listed {} employees from H2 employees table", employees.size());
+        return employees;
     }
 }

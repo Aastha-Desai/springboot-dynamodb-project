@@ -9,6 +9,8 @@ import java.util.Optional;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Repository;
 import software.amazon.awssdk.services.dynamodb.DynamoDbClient;
 import software.amazon.awssdk.services.dynamodb.model.AttributeValue;
@@ -23,6 +25,8 @@ import software.amazon.awssdk.services.dynamodb.model.ScanResponse;
 @RequiredArgsConstructor
 public class DynamoDbEmployeeRepository implements EmployeeRepository {
 
+    private static final Logger log = LoggerFactory.getLogger(DynamoDbEmployeeRepository.class);
+
     private final DynamoDbClient dynamoDbClient;
 
     @Value("${app.dynamodb.table-name:EmployeeTable}")
@@ -30,6 +34,7 @@ public class DynamoDbEmployeeRepository implements EmployeeRepository {
 
     @Override
     public void save(Employee employee) {
+        log.debug("Writing employeeId={} to DynamoDB table={}", employee.getEmployeeId(), tableName);
         Map<String, AttributeValue> item = new HashMap<>();
         item.put("employeeId", AttributeValue.fromS(employee.getEmployeeId()));
         item.put("name", AttributeValue.fromS(employee.getName()));
@@ -41,10 +46,12 @@ public class DynamoDbEmployeeRepository implements EmployeeRepository {
                 .build();
 
         dynamoDbClient.putItem(request);
+        log.info("Saved employeeId={} to DynamoDB table={}", employee.getEmployeeId(), tableName);
     }
 
     @Override
     public Optional<Employee> findById(String employeeId) {
+        log.debug("Reading employeeId={} from DynamoDB table={}", employeeId, tableName);
         Map<String, AttributeValue> key = new HashMap<>();
         key.put("employeeId", AttributeValue.fromS(employeeId));
 
@@ -61,13 +68,16 @@ public class DynamoDbEmployeeRepository implements EmployeeRepository {
                     item.getOrDefault("name", AttributeValue.fromS("")).s(),
                     item.getOrDefault("department", AttributeValue.fromS("")).s()
             );
+            log.debug("Found employeeId={} in DynamoDB table={}", employeeId, tableName);
             return Optional.of(e);
         }
+        log.debug("EmployeeId={} not found in DynamoDB table={}", employeeId, tableName);
         return Optional.empty();
     }
 
     @Override
     public List<Employee> findAll() {
+        log.debug("Scanning employees from DynamoDB table={}", tableName);
         ScanRequest request = ScanRequest.builder()
                 .tableName(tableName)
                 .build();
@@ -82,6 +92,7 @@ public class DynamoDbEmployeeRepository implements EmployeeRepository {
             );
             results.add(e);
         }
+        log.info("Scanned {} employees from DynamoDB table={}", results.size(), tableName);
         return results;
     }
 }
