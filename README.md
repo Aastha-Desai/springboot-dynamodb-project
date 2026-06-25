@@ -262,6 +262,30 @@ Leaving `IMAGE_TAG` blank makes Jenkins use an immutable build tag like:
 build-18
 ```
 
+## Jenkins Shell Scripts
+
+The `.sh` files are used by Jenkins as pipeline helpers. They are not the primary manual deployment entry point.
+
+Jenkins calls:
+
+```text
+scripts/ecr_login_and_push.sh    Build & Push Image stage
+scripts/deploy_ecs.sh            Deploy to ECS stage
+scripts/rollback_ecs.sh          Rollback path when validation fails
+```
+
+The expected production-style flow is:
+
+```text
+merge approved PR into main
+Jenkins detects the SCM change
+Jenkins builds and tests the Java application
+Jenkins runs the shell scripts to push/deploy/rollback
+Java validation and monitor agents verify the ECS deployment
+```
+
+Manual script runs are only for troubleshooting. For normal demo and project operation, run Jenkins.
+
 ## Validate Rollback
 
 To test rollback intentionally, run Jenkins with:
