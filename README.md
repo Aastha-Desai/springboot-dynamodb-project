@@ -179,6 +179,16 @@ write audit records
 
 If there are no source changes, it will not create a PR or send an approval email.
 
+AWS ECS
+``` bash
+aws ecs describe-services \
+  --cluster dynamodb-demo-cluster \
+  --services dynamodb-demo-service \
+  --region us-east-1 \
+  --query 'services[0].{status:status,running:runningCount,desired:desiredCount,taskDefinition:taskDefinition}' \
+  --output table
+  ```
+
 ## Test The Orchestrator With A Controlled Bug
 
 Create a branch with the bug:
@@ -201,6 +211,15 @@ git commit -m "test: remove employee id validation"
 git push -u origin orchestrator-bug-base-test
 ```
 
+Check secrets are set
+```bash
+
+test -n "$GITHUB_TOKEN" && echo "GITHUB_TOKEN is set"
+test -n "$APPROVAL_EMAIL_TO" && echo "APPROVAL_EMAIL_TO is set"
+test -n "$SMTP_HOST" && echo "SMTP_HOST is set"
+test -n "$SMTP_USERNAME" && echo "SMTP_USERNAME is set"
+test -n "$SMTP_PASSWORD" && echo "SMTP_PASSWORD is set"
+```
 Run the orchestrator:
 
 ```bash
