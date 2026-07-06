@@ -14,7 +14,6 @@ import lombok.NoArgsConstructor;
 public class Employee {
 
     @NotBlank
-    @Size(max = 20)
     @Schema(description = "Unique employee identifier", example = "EMP-1001", maxLength = 20)
     private String employeeId;
 
