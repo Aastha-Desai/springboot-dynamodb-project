@@ -210,7 +210,7 @@ git pull origin main
 Create a new broken branch. Increase the number each time you rehearse the demo:
 
 ```bash
-git switch -c demo-bug-run-1
+git switch -c demo-bug-run-final
 ```
 
 Temporarily remove this annotation from `Employee.java`:
@@ -224,7 +224,7 @@ Commit and push the broken branch:
 ```bash
 git add dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java
 git commit -m "test: remove employee id validation"
-git push -u origin demo-bug-run-1
+git push -u origin demo-bug-run-final
 ```
 
 Check secrets are set in the same terminal that will run Maven:
@@ -249,7 +249,7 @@ cd dynamodb-demo
 
 ./mvnw -q exec:java \
   -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
-  -Dexec.args='--skip-monitor --email-mode smtp --base-branch demo-bug-run-1 --fix-branch demo-agent-fix-run-1 --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --pr-title "Agent fix: restore employeeId validation" --summary "The Java agent restored @Size(max = 20), created a PR, and emailed human approval."'
+  -Dexec.args='--skip-monitor --email-mode smtp --base-branch demo-bug-run-final --fix-branch demo-agent-fix-run-final --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --pr-title "Agent fix: restore employeeId validation" --summary "The Java agent restored @Size(max = 20), created a PR, and emailed human approval."'
 ```
 
 Expected result:
