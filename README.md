@@ -88,14 +88,19 @@ export SMTP_PASSWORD="your_app_password"
 ```
 
 For Gmail, `SMTP_PASSWORD` should be a Google app password, not your normal Google account password.
+If a school or work Google account rejects SMTP with `535 Username and Password not accepted`, use a personal Gmail account with its own Google app password.
 
 Check that variables are visible in your terminal:
 
 ```bash
-echo "$GITHUB_TOKEN"
-echo "$APPROVAL_EMAIL_TO"
+test -n "$GITHUB_TOKEN" && echo "GITHUB_TOKEN is set"
+test -n "$APPROVAL_EMAIL_TO" && echo "APPROVAL_EMAIL_TO is set"
 echo "$SMTP_HOST"
+echo "$SMTP_PORT"
 echo "$SMTP_USERNAME"
+echo "$EMAIL_FROM"
+test -n "$SMTP_PASSWORD" && echo "SMTP_PASSWORD is set"
+echo ${#SMTP_PASSWORD}
 ```
 
 Do not commit these values.
@@ -189,12 +194,23 @@ aws ecs describe-services \
   --output table
   ```
 
-## Test The Orchestrator With A Controlled Bug
+## Demo The Bug Fix Agent With A Controlled Bug
 
-Create a branch with the bug:
+Use fresh branch names for every demo run. Reusing old branch names can cause Git checkout errors because the agent creates local commits and PR branches.
+
+Start clean from `main`:
 
 ```bash
-git switch -c orchestrator-bug-base-test
+cd /Users/aasthadesai/springboot-dynamodb-project
+git restore README.md dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java
+git switch main
+git pull origin main
+```
+
+Create a new broken branch. Increase the number each time you rehearse the demo:
+
+```bash
+git switch -c demo-bug-run-1
 ```
 
 Temporarily remove this annotation from `Employee.java`:
@@ -208,18 +224,24 @@ Commit and push the broken branch:
 ```bash
 git add dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java
 git commit -m "test: remove employee id validation"
-git push -u origin orchestrator-bug-base-test
+git push -u origin demo-bug-run-1
 ```
 
-Check secrets are set
-```bash
+Check secrets are set in the same terminal that will run Maven:
 
+```bash
 test -n "$GITHUB_TOKEN" && echo "GITHUB_TOKEN is set"
 test -n "$APPROVAL_EMAIL_TO" && echo "APPROVAL_EMAIL_TO is set"
-test -n "$SMTP_HOST" && echo "SMTP_HOST is set"
-test -n "$SMTP_USERNAME" && echo "SMTP_USERNAME is set"
+echo "$SMTP_HOST"
+echo "$SMTP_PORT"
+echo "$SMTP_USERNAME"
+echo "$EMAIL_FROM"
 test -n "$SMTP_PASSWORD" && echo "SMTP_PASSWORD is set"
+echo ${#SMTP_PASSWORD}
 ```
+
+For Gmail app passwords, `${#SMTP_PASSWORD}` should usually print `16` if you pasted it without spaces.
+
 Run the orchestrator:
 
 ```bash
@@ -227,14 +249,7 @@ cd dynamodb-demo
 
 ./mvnw -q exec:java \
   -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
-  -Dexec.args='\
-  --skip-monitor \
-  --email-mode smtp \
-  --base-branch orchestrator-bug-base-test \
-  --fix-branch orchestrator-validation-fix-test \
-  --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java \
-  --pr-title "Agent orchestrator fix: restore employeeId validation" \
-  --summary "The Java orchestrator detected the missing employeeId validation, auto-fixed it, created a PR, and emailed human approval."'
+  -Dexec.args='--skip-monitor --email-mode smtp --base-branch demo-bug-run-1 --fix-branch demo-agent-fix-run-1 --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --pr-title "Agent fix: restore employeeId validation" --summary "The Java agent restored @Size(max = 20), created a PR, and emailed human approval."'
 ```
 
 Expected result:
@@ -244,6 +259,13 @@ Applied automatic fix
 Tests passed after auto-fix
 Pull request ready: https://github.com/...
 Email notification sent to ...
+```
+
+If you need to rerun the demo, go back to `main` and use new names:
+
+```text
+demo-bug-run-2
+demo-agent-fix-run-2
 ```
 
 ## Jenkins Deployment Flow
