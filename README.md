@@ -37,10 +37,13 @@ The agent workflow adds automation around bug handling:
 ```text
 dynamodb-demo/
   src/main/java/...          Spring Boot application
-  src/main/java/.../agent/   Java ECS monitor, auto-fix, PR/email, validation, and orchestrator agents
   scripts/                   ECR push, ECS deploy, ECS rollback scripts
   ecs/                       ECS task definition template
   Jenkinsfile                Build, deploy, validate, rollback pipeline
+
+agent-runner/
+  src/main/java/...          External Java ECS monitor, auto-fix, PR/email, validation, and orchestrator agents
+  pom.xml                    Agent-only dependencies such as ECS, EC2, DynamoDB audit, and email
 ```
 
 ## Required Local/AWS Setup
@@ -146,10 +149,10 @@ jdbc:h2:mem:employees-local
 The main automation entry point is:
 
 ```bash
-cd dynamodb-demo
+cd agent-runner
 
-./mvnw -q exec:java \
-  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
+./mvnw -q compile exec:java \
+  -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
   -Dexec.args='\
   --email-mode smtp \
   --fix-branch agent-auto-fix \
@@ -161,8 +164,8 @@ cd dynamodb-demo
 For a local/demo run without ECS monitoring:
 
 ```bash
-./mvnw -q exec:java \
-  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
+./mvnw -q compile exec:java \
+  -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
   -Dexec.args='\
   --skip-monitor \
   --email-mode smtp \
@@ -245,10 +248,10 @@ For Gmail app passwords, `${#SMTP_PASSWORD}` should usually print `16` if you pa
 Run the orchestrator:
 
 ```bash
-cd dynamodb-demo
+cd agent-runner
 
-./mvnw -q exec:java \
-  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
+./mvnw -q compile exec:java \
+  -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
   -Dexec.args='--skip-monitor --email-mode smtp --base-branch demo-bug-run-final --fix-branch demo-agent-fix-run-final --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --pr-title "Agent fix: restore employeeId validation" --summary "The Java agent restored @Size(max = 20), created a PR, and emailed human approval."'
 ```
 
@@ -391,10 +394,10 @@ The Java agents are configured with command-line arguments and environment varia
 Example:
 
 ```bash
-cd dynamodb-demo
-./mvnw -q exec:java \
-  -Dexec.mainClass=com.example.dynamodb_demo.agent.JavaOrchestratorAgent \
-  -Dexec.args='--project-dir . --repo-dir .. --github-repo owner/repo --cluster your-cluster --service your-service --paths path/to/Employee.java --email-mode smtp'
+cd agent-runner
+./mvnw -q compile exec:java \
+  -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
+  -Dexec.args='--project-dir ../dynamodb-demo --repo-dir .. --github-repo owner/repo --cluster your-cluster --service your-service --paths path/to/Employee.java --email-mode smtp'
 ```
 
 The new repository owner must provide their own `GITHUB_TOKEN` and SMTP/email environment variables.
