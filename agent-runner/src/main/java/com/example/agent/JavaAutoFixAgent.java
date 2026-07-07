@@ -1,4 +1,4 @@
-package com.example.dynamodb_demo.agent;
+package com.example.agent;
 
 import java.io.IOException;
 import java.net.URI;
@@ -25,7 +25,7 @@ public final class JavaAutoFixAgent {
 
     public static int execute(String[] args) throws Exception {
         AgentArgs parsed = AgentArgs.parse(args);
-        Path projectDir = Path.of(parsed.get("project-dir", ".")).toAbsolutePath().normalize();
+        Path projectDir = Path.of(parsed.get("project-dir", "../dynamodb-demo")).toAbsolutePath().normalize();
         String region = parsed.get("region", "us-east-1");
         String auditTable = parsed.get("audit-table", "AgentAudit");
         String baseUrl = parsed.get("base-url", "");

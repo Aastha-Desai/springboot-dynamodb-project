@@ -1,4 +1,4 @@
-package com.example.dynamodb_demo.agent;
+package com.example.agent;
 
 import java.util.HashMap;
 import java.util.Map;
