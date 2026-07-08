@@ -27,7 +27,8 @@ public class JdbcEmployeeRepository implements EmployeeRepository {
                 CREATE TABLE IF NOT EXISTS employees (
                     employee_id VARCHAR(20) PRIMARY KEY,
                     name VARCHAR(255) NOT NULL,
-                    department VARCHAR(255) NOT NULL
+                    department VARCHAR(255) NOT NULL,
+                    address VARCHAR(255) NOT NULL
                 )
                 """);
     }
@@ -36,13 +37,14 @@ public class JdbcEmployeeRepository implements EmployeeRepository {
     public void save(Employee employee) {
         log.debug("Saving employeeId={} to H2 employees table", employee.getEmployeeId());
         jdbcTemplate.update("""
-                        MERGE INTO employees (employee_id, name, department)
+                        MERGE INTO employees (employee_id, name, department, address)
                         KEY(employee_id)
-                        VALUES (?, ?, ?)
+                        VALUES (?, ?, ?, ?)
                         """,
                 employee.getEmployeeId(),
                 employee.getName(),
-                employee.getDepartment());
+                employee.getDepartment(),
+                employee.getAddress());
         log.info("Saved employeeId={} to H2 employees table", employee.getEmployeeId());
     }
 
@@ -50,11 +52,12 @@ public class JdbcEmployeeRepository implements EmployeeRepository {
     public Optional<Employee> findById(String employeeId) {
         log.debug("Reading employeeId={} from H2 employees table", employeeId);
         List<Employee> employees = jdbcTemplate.query(
-                "SELECT employee_id, name, department FROM employees WHERE employee_id = ?",
+                "SELECT employee_id, name, department, address FROM employees WHERE employee_id = ?",
                 (rs, rowNum) -> new Employee(
                         rs.getString("employee_id"),
                         rs.getString("name"),
-                        rs.getString("department")),
+                        rs.getString("department"),
+                        rs.getString("address")),
                 employeeId);
         log.debug("H2 lookup result for employeeId={} found={}", employeeId, !employees.isEmpty());
         return employees.stream().findFirst();
@@ -64,11 +67,12 @@ public class JdbcEmployeeRepository implements EmployeeRepository {
     public List<Employee> findAll() {
         log.debug("Listing employees from H2 employees table");
         List<Employee> employees = jdbcTemplate.query(
-                "SELECT employee_id, name, department FROM employees ORDER BY employee_id",
+                "SELECT employee_id, name, department, address FROM employees ORDER BY employee_id",
                 (rs, rowNum) -> new Employee(
                         rs.getString("employee_id"),
                         rs.getString("name"),
-                        rs.getString("department")));
+                        rs.getString("department"),
+                        rs.getString("address")));
         log.info("Listed {} employees from H2 employees table", employees.size());
         return employees;
     }

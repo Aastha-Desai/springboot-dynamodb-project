@@ -1,0 +1,37 @@
+{
+  "projectName": "springboot-dynamodb-project",
+  "repoDir": "..",
+  "projectDir": "../dynamodb-demo",
+  "agentPrompt": "../agent-config/agent-prompt.md",
+  "aws": {
+    "region": "us-east-1",
+    "cluster": "dynamodb-demo-cluster",
+    "service": "dynamodb-demo-service",
+    "auditTable": "AgentAudit"
+  },
+  "testCommand": [
+    "./mvnw",
+    "test",
+    "-q"
+  ],
+  "validationRules": [
+    {
+      "name": "employee-address-special-character-validation",
+      "type": "java-field-annotation",
+      "file": "src/main/java/com/example/dynamodb_demo/model/Employee.java",
+      "field": "address",
+      "requiredImport": "jakarta.validation.constraints.Pattern",
+      "annotation": "@Pattern(regexp = \"^[a-zA-Z0-9 ,.-]+$\", message = \"address contains invalid characters\")",
+      "bugType": "VALIDATION",
+      "severity": "MEDIUM",
+      "validationEndpoint": "/api/employees",
+      "expectedFailureStatus": 400,
+      "invalidPayload": {
+        "employeeId": "EMP-ADDR-BAD",
+        "name": "Invalid Employee",
+        "department": "Quality",
+        "address": "New_Jersey:"
+      }
+    }
+  ]
+}

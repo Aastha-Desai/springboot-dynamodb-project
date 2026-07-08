@@ -15,6 +15,7 @@ public final class JavaOrchestratorAgent {
 
     public static int execute(String[] args) throws Exception {
         AgentArgs parsed = AgentArgs.parse(args);
+        String configPath = parsed.get("config", AgentConfig.defaultConfigPath().toString());
         Path projectDir = Path.of(parsed.get("project-dir", "../dynamodb-demo")).toAbsolutePath().normalize();
         Path repoDir = Path.of(parsed.get("repo-dir", "..")).toAbsolutePath().normalize();
         String region = parsed.get("region", "us-east-1");
@@ -57,6 +58,7 @@ public final class JavaOrchestratorAgent {
         }
 
         List<String> fixArgs = new ArrayList<>(List.of(
+                "--config", configPath,
                 "--project-dir", projectDir.toString(),
                 "--region", region,
                 "--audit-table", auditTable));

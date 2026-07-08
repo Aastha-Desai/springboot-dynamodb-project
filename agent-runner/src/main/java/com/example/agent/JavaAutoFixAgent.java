@@ -13,9 +13,6 @@ import java.util.regex.Pattern;
 
 public final class JavaAutoFixAgent {
 
-    private static final String LONG_EMPLOYEE_ID = "EMP-" + "X".repeat(25);
-    private static final Pattern EMPLOYEE_ID_FIELD = Pattern.compile("\\bprivate\\s+String\\s+employeeId\\s*;");
-
     private JavaAutoFixAgent() {
     }
 
@@ -25,30 +22,43 @@ public final class JavaAutoFixAgent {
 
     public static int execute(String[] args) throws Exception {
         AgentArgs parsed = AgentArgs.parse(args);
-        Path projectDir = Path.of(parsed.get("project-dir", "../dynamodb-demo")).toAbsolutePath().normalize();
-        String region = parsed.get("region", "us-east-1");
-        String auditTable = parsed.get("audit-table", "AgentAudit");
+        Path configPath = Path.of(parsed.get("config", AgentConfig.defaultConfigPath().toString()))
+                .toAbsolutePath()
+                .normalize();
+        AgentConfig config = AgentConfig.load(configPath);
+        Path configDir = configPath.getParent();
+        Path projectDir = Path.of(parsed.get("project-dir", resolve(configDir, config.projectDir()).toString()))
+                .toAbsolutePath()
+                .normalize();
+        String region = parsed.get("region", config.aws().region());
+        String auditTable = parsed.get("audit-table", config.aws().auditTable());
         String baseUrl = parsed.get("base-url", "");
         boolean dryRun = parsed.has("dry-run");
         boolean applyFix = !parsed.has("no-apply") && !dryRun;
         boolean runTests = !parsed.has("skip-tests");
 
-        System.out.printf("[%s] Java auto-fix agent checking employeeId validation%n", AgentSupport.utcNow());
+        System.out.printf("[%s] Java auto-fix agent checking configured validation rules%n", AgentSupport.utcNow());
 
-        Integer deployedStatus = null;
+        List<RuleCheck> checks = new ArrayList<>();
         if (!baseUrl.isBlank()) {
-            deployedStatus = deployedValidationStatus(baseUrl);
-            System.out.printf("Deployed validation check returned HTTP %d%n", deployedStatus);
-            if (deployedStatus != 400) {
-                String message = "Bug detected: employeeId longer than 20 chars returned HTTP "
-                        + deployedStatus + "; expected 400.";
-                System.out.println("Notification: " + message);
-                AuditWriter.put(region, auditTable, "java-auto-fix-agent", "BUG_DETECTED", "OPEN",
-                        "VALIDATION", "HIGH", employeeModelPath(projectDir).toString(), message, dryRun);
+            for (AgentConfig.ValidationRule rule : config.rules()) {
+                if (rule.validationEndpoint() == null || rule.validationEndpoint().isBlank() || rule.payload().isEmpty()) {
+                    continue;
+                }
+                int status = deployedValidationStatus(baseUrl, rule);
+                checks.add(new RuleCheck(rule, status));
+                System.out.printf("Rule %s validation check returned HTTP %d%n", rule.name(), status);
+                if (status != rule.effectiveExpectedFailureStatus()) {
+                    String message = "Bug detected: rule %s returned HTTP %d; expected %d."
+                            .formatted(rule.name(), status, rule.effectiveExpectedFailureStatus());
+                    System.out.println("Notification: " + message);
+                    AuditWriter.put(region, auditTable, "java-auto-fix-agent", "BUG_DETECTED", "OPEN",
+                            rule.effectiveBugType(), rule.effectiveSeverity(), rule.file(), message, dryRun);
+                }
             }
         }
 
-        FixResult fix = ensureEmployeeIdValidation(projectDir, applyFix);
+        FixResult fix = ensureConfiguredValidationRules(projectDir, config.rules(), applyFix);
         System.out.println("Notification: " + fix.message());
 
         if (dryRun) {
@@ -57,9 +67,9 @@ public final class JavaAutoFixAgent {
 
         if (fix.changed()) {
             AuditWriter.put(region, auditTable, "java-auto-fix-agent", "BUG_FIXED_AUTOMATICALLY", "FIX_APPLIED",
-                    "VALIDATION", "MEDIUM", employeeModelPath(projectDir).toString(), fix.message(), false);
+                    "VALIDATION", "MEDIUM", projectDir.toString(), fix.message(), false);
             if (runTests) {
-                TestResult test = runTests(projectDir);
+                TestResult test = runTests(projectDir, config.effectiveTestCommand());
                 System.out.println("Notification: " + test.message());
                 AuditWriter.put(region, auditTable, "java-auto-fix-agent",
                         test.passed() ? "AUTO_FIX_VALIDATED" : "AUTO_FIX_VALIDATION_FAILED",
@@ -74,43 +84,67 @@ public final class JavaAutoFixAgent {
             return 0;
         }
 
-        if (deployedStatus == null || deployedStatus == 400) {
+        boolean deployedRulesAlreadyPass = checks.stream()
+                .allMatch(check -> check.status() == check.rule().effectiveExpectedFailureStatus());
+        if (checks.isEmpty() || deployedRulesAlreadyPass) {
             AuditWriter.put(region, auditTable, "java-auto-fix-agent", "FIX_NOT_REQUIRED", "NO_ACTION",
-                    "VALIDATION", "LOW", employeeModelPath(projectDir).toString(), fix.message(), false);
+                    "VALIDATION", "LOW", projectDir.toString(), fix.message(), false);
             return 0;
         }
 
-        String message = "Source already contains validation fix; redeploy may be needed for the running ECS task.";
+        String message = "Source already contains configured validation rules; redeploy may be needed for the running ECS task.";
         System.out.println("Notification: " + message);
         AuditWriter.put(region, auditTable, "java-auto-fix-agent", "FIX_NOT_APPLIED", "REDEPLOY_RECOMMENDED",
-                "VALIDATION", "HIGH", employeeModelPath(projectDir).toString(), message, false);
+                "VALIDATION", "HIGH", projectDir.toString(), message, false);
         return 1;
     }
 
-    static FixResult ensureEmployeeIdValidation(Path projectDir, boolean applyFix) throws IOException {
-        Path path = employeeModelPath(projectDir);
+    static FixResult ensureConfiguredValidationRules(
+            Path projectDir,
+            List<AgentConfig.ValidationRule> rules,
+            boolean applyFix) throws IOException {
+        List<String> messages = new ArrayList<>();
+        boolean changed = false;
+
+        for (AgentConfig.ValidationRule rule : rules) {
+            if (!"java-field-annotation".equals(rule.type())) {
+                messages.add("Skipped unsupported rule type for %s: %s".formatted(rule.name(), rule.type()));
+                continue;
+            }
+            FixResult result = ensureJavaFieldAnnotation(projectDir, rule, applyFix);
+            changed = changed || result.changed();
+            messages.add(result.message());
+        }
+
+        if (messages.isEmpty()) {
+            return new FixResult(false, "No configured validation rules found.");
+        }
+        return new FixResult(changed, String.join(" | ", messages));
+    }
+
+    private static FixResult ensureJavaFieldAnnotation(
+            Path projectDir,
+            AgentConfig.ValidationRule rule,
+            boolean applyFix) throws IOException {
+        Path path = projectDir.resolve(rule.file()).normalize();
         String text = Files.readString(path);
         List<String> lines = new ArrayList<>(text.lines().toList());
-        int fieldIndex = findEmployeeIdLine(lines);
+        int fieldIndex = findFieldLine(lines, rule.field());
 
-        if (hasCorrectEmployeeIdSize(lines, fieldIndex)) {
-            return new FixResult(false, "employeeId already has @Size(max = 20); no source fix needed.");
+        if (hasAnnotation(lines, fieldIndex, rule.annotation())) {
+            return new FixResult(false, "Rule %s already exists on field %s; no source fix needed."
+                    .formatted(rule.name(), rule.field()));
         }
 
         boolean changed = false;
-        if (!text.contains("import jakarta.validation.constraints.Size;")) {
-            int importIndex = 0;
-            for (int index = 0; index < lines.size(); index++) {
-                if (lines.get(index).startsWith("import ")) {
-                    importIndex = index;
-                    if (lines.get(index).equals("import jakarta.validation.constraints.NotBlank;")) {
-                        break;
-                    }
-                }
+        if (rule.requiredImport() != null && !rule.requiredImport().isBlank()) {
+            String importLine = "import " + rule.requiredImport() + ";";
+            if (!text.contains(importLine)) {
+                int importIndex = findImportInsertIndex(lines);
+                lines.add(importIndex + 1, importLine);
+                fieldIndex++;
+                changed = true;
             }
-            lines.add(importIndex + 1, "import jakarta.validation.constraints.Size;");
-            fieldIndex++;
-            changed = true;
         }
 
         int annotationStart = fieldIndex;
@@ -118,17 +152,18 @@ public final class JavaAutoFixAgent {
             annotationStart--;
         }
 
-        boolean replacedExistingSize = false;
+        String annotationPrefix = annotationPrefix(rule.annotation());
+        boolean replacedExistingAnnotation = false;
         for (int index = annotationStart; index < fieldIndex; index++) {
-            if (lines.get(index).trim().startsWith("@Size")) {
-                lines.set(index, "    @Size(max = 20)");
-                replacedExistingSize = true;
+            if (lines.get(index).trim().startsWith(annotationPrefix)) {
+                lines.set(index, "    " + rule.annotation());
+                replacedExistingAnnotation = true;
                 changed = true;
                 break;
             }
         }
 
-        if (!replacedExistingSize) {
+        if (!replacedExistingAnnotation) {
             int insertIndex = annotationStart;
             for (int index = annotationStart; index < fieldIndex; index++) {
                 if (lines.get(index).trim().startsWith("@NotBlank")) {
@@ -136,58 +171,78 @@ public final class JavaAutoFixAgent {
                     break;
                 }
             }
-            lines.add(insertIndex, "    @Size(max = 20)");
+            lines.add(insertIndex, "    " + rule.annotation());
             changed = true;
         }
 
         if (!changed) {
-            return new FixResult(false, "No source change was required.");
+            return new FixResult(false, "No source change was required for rule " + rule.name() + ".");
         }
         if (applyFix) {
             Files.writeString(path, String.join("\n", lines) + "\n");
-            return new FixResult(true, "Applied automatic fix: added @Size(max = 20) validation to employeeId.");
+            return new FixResult(true, "Applied automatic fix for rule %s on field %s."
+                    .formatted(rule.name(), rule.field()));
         }
-        return new FixResult(false, "Validation fix is needed, but no file changed because apply mode is disabled.");
+        return new FixResult(false, "Rule %s needs a fix, but apply mode is disabled.".formatted(rule.name()));
     }
 
-    private static Path employeeModelPath(Path projectDir) {
-        return projectDir.resolve("src/main/java/com/example/dynamodb_demo/model/Employee.java");
-    }
-
-    private static int findEmployeeIdLine(List<String> lines) {
+    private static int findFieldLine(List<String> lines, String fieldName) {
+        Pattern fieldPattern = Pattern.compile("\\bprivate\\s+\\w+(?:<[^>]+>)?\\s+" + Pattern.quote(fieldName) + "\\s*;");
         for (int index = 0; index < lines.size(); index++) {
-            if (EMPLOYEE_ID_FIELD.matcher(lines.get(index)).find()) {
+            if (fieldPattern.matcher(lines.get(index)).find()) {
                 return index;
             }
         }
-        throw new IllegalStateException("Could not find employeeId field in Employee.java");
+        throw new IllegalStateException("Could not find field " + fieldName + " in configured Java file.");
     }
 
-    private static boolean hasCorrectEmployeeIdSize(List<String> lines, int fieldIndex) {
+    private static boolean hasAnnotation(List<String> lines, int fieldIndex, String annotation) {
+        String expected = normalizeAnnotation(annotation);
         int start = Math.max(0, fieldIndex - 8);
         for (int index = start; index < fieldIndex; index++) {
-            String line = lines.get(index);
-            if (line.contains("@Size(max = 20)") || line.contains("@Size(max=20)")) {
+            if (normalizeAnnotation(lines.get(index).trim()).equals(expected)) {
                 return true;
             }
         }
         return false;
     }
 
-    private static Integer deployedValidationStatus(String baseUrl) throws IOException, InterruptedException {
-        String payload = """
-                {"employeeId":"%s","name":"Validation Check","department":"Quality"}
-                """.formatted(LONG_EMPLOYEE_ID);
+    private static int findImportInsertIndex(List<String> lines) {
+        int importIndex = 0;
+        for (int index = 0; index < lines.size(); index++) {
+            if (lines.get(index).startsWith("import ")) {
+                importIndex = index;
+            }
+        }
+        return importIndex;
+    }
+
+    private static String annotationPrefix(String annotation) {
+        int paren = annotation.indexOf('(');
+        String prefix = paren >= 0 ? annotation.substring(0, paren) : annotation;
+        return prefix.trim();
+    }
+
+    private static String normalizeAnnotation(String value) {
+        return value.replaceAll("\\s+", "");
+    }
+
+    private static Integer deployedValidationStatus(String baseUrl, AgentConfig.ValidationRule rule)
+            throws IOException, InterruptedException {
+        String payload = AgentConfig.toJson(rule.payload());
+        String endpoint = rule.validationEndpoint().startsWith("/")
+                ? rule.validationEndpoint()
+                : "/" + rule.validationEndpoint();
         HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(baseUrl.replaceAll("/$", "") + "/api/employees"))
+                .uri(URI.create(baseUrl.replaceAll("/$", "") + endpoint))
                 .header("Content-Type", "application/json")
                 .POST(HttpRequest.BodyPublishers.ofString(payload))
                 .build();
         return HttpClient.newHttpClient().send(request, HttpResponse.BodyHandlers.discarding()).statusCode();
     }
 
-    private static TestResult runTests(Path projectDir) throws IOException, InterruptedException {
-        AgentSupport.CommandResult result = AgentSupport.run(projectDir, List.of("./mvnw", "test", "-q"), false);
+    private static TestResult runTests(Path projectDir, List<String> testCommand) throws IOException, InterruptedException {
+        AgentSupport.CommandResult result = AgentSupport.run(projectDir, testCommand, false);
         if (result.exitCode() == 0) {
             return new TestResult(true, "Tests passed after auto-fix.");
         }
@@ -196,7 +251,18 @@ public final class JavaAutoFixAgent {
         return new TestResult(false, "Tests failed after auto-fix: " + detail);
     }
 
+    private static Path resolve(Path baseDir, String value) {
+        if (value == null || value.isBlank()) {
+            return baseDir;
+        }
+        Path path = Path.of(value);
+        return path.isAbsolute() ? path.normalize() : baseDir.resolve(path).normalize();
+    }
+
     record FixResult(boolean changed, String message) {
+    }
+
+    record RuleCheck(AgentConfig.ValidationRule rule, int status) {
     }
 
     record TestResult(boolean passed, String message) {
