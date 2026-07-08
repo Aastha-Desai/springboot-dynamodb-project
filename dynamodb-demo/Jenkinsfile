@@ -7,6 +7,8 @@ pipeline {
     string(name: 'SERVICE_NAME', defaultValue: 'dynamodb-demo-service', description: 'ECS service name')
     string(name: 'TASK_FAMILY', defaultValue: 'dynamodb-demo-task', description: 'ECS task family')
     string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional Docker image tag. Leave blank to use a build-specific immutable tag.')
+    string(name: 'AGENT_EMAIL_MODE', defaultValue: 'smtp', description: 'Agent email mode when validation fails: smtp, preview, or auto')
+    booleanParam(name: 'RUN_ECS_MONITOR', defaultValue: false, description: 'Optional manual ECS monitor check. Normal builds only invoke the agent after validation fails.')
     booleanParam(name: 'FORCE_VALIDATION_FAILURE', defaultValue: false, description: 'Demo/test Part 8 rollback by forcing deployment validation to fail')
   }
   environment {
@@ -16,6 +18,7 @@ pipeline {
     CLUSTER_NAME = "${params.CLUSTER_NAME}"
     SERVICE_NAME = "${params.SERVICE_NAME}"
     TASK_FAMILY = "${params.TASK_FAMILY}"
+    AGENT_EMAIL_MODE = "${params.AGENT_EMAIL_MODE}"
     PREVIOUS_TASK_DEFINITION = ""
   }
   stages {
@@ -112,7 +115,16 @@ pipeline {
                   ../dynamodb-demo/scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" AgentAudit
                 '''
                 sh './mvnw -q compile exec:java -Dexec.mainClass=com.example.agent.JavaValidateEcsDeploymentAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit"'
-                error "Deployment validation failed; ECS was rolled back to the captured previous task definition."
+
+                echo "Rollback validated. Invoking external agent-runner to prepare a fix PR and human approval email."
+                def baseBranch = env.BRANCH_NAME ?: 'main'
+                def fixBranch = "agent-validation-fix-${env.BUILD_NUMBER}"
+                sh """
+                  ./mvnw -q compile exec:java \
+                    -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
+                    -Dexec.args='--skip-monitor --config ../agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message "fix: apply validation bug fix" --pr-title "Agent fix: restore validation rule" --summary "Jenkins validation failed, ECS was rolled back, and the external Java agent generated this PR for human approval."'
+                """
+                error "Deployment validation failed; ECS was rolled back and the external agent was invoked for PR/email approval."
               }
             }
           }
@@ -120,6 +132,9 @@ pipeline {
       }
     }
     stage('Monitor ECS') {
+      when {
+        expression { return params.RUN_ECS_MONITOR }
+      }
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           dir('agent-runner') {
