@@ -39,6 +39,7 @@ public class DynamoDbEmployeeRepository implements EmployeeRepository {
         item.put("employeeId", AttributeValue.fromS(employee.getEmployeeId()));
         item.put("name", AttributeValue.fromS(employee.getName()));
         item.put("department", AttributeValue.fromS(employee.getDepartment()));
+        item.put("address", AttributeValue.fromS(employee.getAddress()));
 
         PutItemRequest request = PutItemRequest.builder()
                 .tableName(tableName)
@@ -66,7 +67,8 @@ public class DynamoDbEmployeeRepository implements EmployeeRepository {
             Employee e = new Employee(
                     item.get("employeeId").s(),
                     item.getOrDefault("name", AttributeValue.fromS("")).s(),
-                    item.getOrDefault("department", AttributeValue.fromS("")).s()
+                    item.getOrDefault("department", AttributeValue.fromS("")).s(),
+                    item.getOrDefault("address", AttributeValue.fromS("")).s()
             );
             log.debug("Found employeeId={} in DynamoDB table={}", employeeId, tableName);
             return Optional.of(e);
@@ -88,7 +90,8 @@ public class DynamoDbEmployeeRepository implements EmployeeRepository {
             Employee e = new Employee(
                     item.getOrDefault("employeeId", AttributeValue.fromS("")).s(),
                     item.getOrDefault("name", AttributeValue.fromS("")).s(),
-                    item.getOrDefault("department", AttributeValue.fromS("")).s()
+                    item.getOrDefault("department", AttributeValue.fromS("")).s(),
+                    item.getOrDefault("address", AttributeValue.fromS("")).s()
             );
             results.add(e);
         }

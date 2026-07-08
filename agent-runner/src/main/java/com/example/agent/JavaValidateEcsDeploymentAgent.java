@@ -5,6 +5,7 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
@@ -29,10 +30,14 @@ public final class JavaValidateEcsDeploymentAgent {
 
     public static int execute(String[] args) throws Exception {
         AgentArgs parsed = AgentArgs.parse(args);
-        String region = parsed.get("region", "us-east-1");
-        String cluster = parsed.get("cluster", "dynamodb-demo-cluster");
-        String service = parsed.get("service", "dynamodb-demo-service");
-        String auditTable = parsed.get("audit-table", "AgentAudit");
+        Path configPath = Path.of(parsed.get("config", AgentConfig.defaultConfigPath().toString()))
+                .toAbsolutePath()
+                .normalize();
+        AgentConfig config = AgentConfig.load(configPath);
+        String region = parsed.get("region", config.aws().region());
+        String cluster = parsed.get("cluster", config.aws().cluster());
+        String service = parsed.get("service", config.aws().service());
+        String auditTable = parsed.get("audit-table", config.aws().auditTable());
         String explicitBaseUrl = parsed.get("base-url", "");
         int port = parsed.getInt("port", 8080);
         boolean skipAudit = parsed.has("skip-audit");
@@ -41,7 +46,7 @@ public final class JavaValidateEcsDeploymentAgent {
         String baseUrl = explicitBaseUrl.isBlank() ? publicBaseUrl(region, cluster, service, port) : stripTrailingSlash(explicitBaseUrl);
         System.out.printf("[%s] Java deployment validator checking ECS deployment at %s%n", AgentSupport.utcNow(), baseUrl);
 
-        List<String> failures = validate(baseUrl);
+        List<String> failures = validate(baseUrl, config.rules());
         if (forceFail) {
             failures.add("Forced validation failure requested for rollback test.");
         }
@@ -55,7 +60,7 @@ public final class JavaValidateEcsDeploymentAgent {
             return 1;
         }
 
-        String message = "Deployment validation succeeded: Swagger, POST/GET employee, and long employeeId validation passed.";
+        String message = "Deployment validation succeeded: Swagger, POST/GET employee, and address special-character validation passed.";
         System.out.println(message);
         AuditWriter.put(region, auditTable, "java-deployment-validation-agent",
                 "DEPLOYMENT_VALIDATED", "PASSED", "DEPLOYMENT_VALIDATION",
@@ -103,7 +108,7 @@ public final class JavaValidateEcsDeploymentAgent {
         }
     }
 
-    static List<String> validate(String baseUrl) throws IOException, InterruptedException {
+    static List<String> validate(String baseUrl, List<AgentConfig.ValidationRule> rules) throws IOException, InterruptedException {
         HttpClient client = HttpClient.newHttpClient();
         List<String> failures = new ArrayList<>();
 
@@ -114,7 +119,7 @@ public final class JavaValidateEcsDeploymentAgent {
 
         String employeeId = "EMP-" + Instant.now().getEpochSecond();
         String employeePayload = """
-                {"employeeId":"%s","name":"Deployment Validator","department":"Quality"}
+                {"employeeId":"%s","name":"Deployment Validator","department":"Quality","address":"123 Main St, Newark NJ"}
                 """.formatted(employeeId);
         HttpResult post = request(client, baseUrl + "/api/employees", "POST", employeePayload);
         if (post.status() != 201) {
@@ -126,13 +131,18 @@ public final class JavaValidateEcsDeploymentAgent {
             failures.add("Employee GET failed: HTTP " + get.status() + " body=" + truncate(get.body()));
         }
 
-        String invalidPayload = """
-                {"employeeId":"EMP-%s","name":"Invalid Employee","department":"Quality"}
-                """.formatted("X".repeat(25));
-        HttpResult invalid = request(client, baseUrl + "/api/employees", "POST", invalidPayload);
-        if (invalid.status() != 400) {
-            failures.add("Long employeeId validation failed: expected HTTP 400, got "
-                    + invalid.status() + " body=" + truncate(invalid.body()));
+        for (AgentConfig.ValidationRule rule : rules) {
+            if (rule.validationEndpoint() == null || rule.validationEndpoint().isBlank() || rule.payload().isEmpty()) {
+                continue;
+            }
+            String endpoint = rule.validationEndpoint().startsWith("/")
+                    ? rule.validationEndpoint()
+                    : "/" + rule.validationEndpoint();
+            HttpResult invalid = request(client, baseUrl + endpoint, "POST", AgentConfig.toJson(rule.payload()));
+            if (invalid.status() != rule.effectiveExpectedFailureStatus()) {
+                failures.add("Rule %s failed: expected HTTP %d, got HTTP %d body=%s"
+                        .formatted(rule.name(), rule.effectiveExpectedFailureStatus(), invalid.status(), truncate(invalid.body())));
+            }
         }
         return failures;
     }

@@ -9,11 +9,11 @@ The application exposes employee APIs that accept JSON payloads and store employ
 The agent workflow adds automation around bug handling:
 
 1. `JavaEcsMonitorAgent` monitors ECS service/task health and audits bugs.
-2. `JavaAutoFixAgent` applies a known validation fix, such as restoring `@Size(max = 20)` for `employeeId`.
+2. `JavaAutoFixAgent` applies a known validation fix, such as restoring address special-character validation.
 3. `JavaPrApprovalAgent` creates a GitHub PR and sends an email notification for human approval.
 4. `JavaOrchestratorAgent` runs the monitor, auto-fix, PR, and email agents as one coordinated workflow.
 5. Jenkins deploys merged/approved changes to ECS.
-6. `JavaValidateEcsDeploymentAgent` validates Swagger, employee POST/GET, and invalid `employeeId` handling.
+6. `JavaValidateEcsDeploymentAgent` validates Swagger, employee POST/GET, and invalid address handling.
 7. `rollback_ecs.sh` restores the previous ECS task definition if validation fails.
 8. Agent and deployment actions are audited in DynamoDB table `AgentAudit`.
 
@@ -146,6 +146,15 @@ jdbc:h2:mem:employees-local
 
 ## Run The Java Coordinated Agent Workflow
 
+The external agents read project-specific behavior from:
+
+```text
+agent-config/project-config.json
+agent-config/agent-prompt.md
+```
+
+`agent-prompt.md` describes the agent behavior and safety expectations. `project-config.json` defines concrete rules, such as which Java file/field/annotation to validate, what invalid payload should fail, and which AWS ECS service to monitor. To add another validation bug scenario, add another entry to `validationRules` instead of rewriting the Java agent.
+
 The main automation entry point is:
 
 ```bash
@@ -216,17 +225,17 @@ Create a new broken branch. Increase the number each time you rehearse the demo:
 git switch -c demo-bug-run-final
 ```
 
-Temporarily remove this annotation from `Employee.java`:
+Temporarily remove this annotation from the `address` field in `Employee.java`:
 
 ```java
-@Size(max = 20)
+@Pattern(regexp = "^[a-zA-Z0-9 ,.-]+$", message = "address contains invalid characters")
 ```
 
 Commit and push the broken branch:
 
 ```bash
 git add dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java
-git commit -m "test: remove employee id validation"
+git commit -m "test: remove employee address validation"
 git push -u origin demo-bug-run-final
 ```
 
@@ -252,7 +261,7 @@ cd agent-runner
 
 ./mvnw -q compile exec:java \
   -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
-  -Dexec.args='--skip-monitor --email-mode smtp --base-branch demo-bug-run-final --fix-branch demo-agent-fix-run-final --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --pr-title "Agent fix: restore employeeId validation" --summary "The Java agent restored @Size(max = 20), created a PR, and emailed human approval."'
+  -Dexec.args='--skip-monitor --email-mode smtp --base-branch demo-bug-run-final --fix-branch demo-agent-fix-run-final --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --pr-title "Agent fix: restore employee address validation" --summary "The Java agent restored address special-character validation, created a PR, and emailed human approval."'
 ```
 
 Expected result:
@@ -345,7 +354,7 @@ Expected proof in Jenkins:
 Previous ECS task definition: arn:aws:ecs:...
 Deployment validation failed: Forced validation failure requested for rollback test.
 Rollback completed and audited.
-Deployment validation succeeded: Swagger, POST/GET employee, and long employeeId validation passed.
+Deployment validation succeeded: Swagger, POST/GET employee, and address special-character validation passed.
 ```
 
 The build may end as failed during this forced test. That is expected because the new deployment was rejected, but ECS was restored to the previous working task definition.
@@ -382,6 +391,8 @@ DEPLOYMENT_ROLLED_BACK
 
 The Java agents are configured with command-line arguments and environment variables, so another repository can reuse the same workflow by changing:
 
+- `agent-config/project-config.json`
+- `agent-config/agent-prompt.md`
 - `repo_dir`
 - `project_dir`
 - `github_repo`
@@ -397,7 +408,7 @@ Example:
 cd agent-runner
 ./mvnw -q compile exec:java \
   -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
-  -Dexec.args='--project-dir ../dynamodb-demo --repo-dir .. --github-repo owner/repo --cluster your-cluster --service your-service --paths path/to/Employee.java --email-mode smtp'
+  -Dexec.args='--config ../agent-config/project-config.json --project-dir ../dynamodb-demo --repo-dir .. --github-repo owner/repo --cluster your-cluster --service your-service --paths path/to/Employee.java --email-mode smtp'
 ```
 
 The new repository owner must provide their own `GITHUB_TOKEN` and SMTP/email environment variables.

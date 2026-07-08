@@ -34,13 +34,15 @@ class DynamodbDemoApplicationTests {
 								{
 								  "employeeId": "EMP-1001",
 								  "name": "Asha Patel",
-								  "department": "Engineering"
+								  "department": "Engineering",
+								  "address": "123 Main St, Newark NJ"
 								}
 								"""))
 				.andExpect(status().isCreated())
 				.andExpect(jsonPath("$.employeeId").value("EMP-1001"))
 				.andExpect(jsonPath("$.name").value("Asha Patel"))
-				.andExpect(jsonPath("$.department").value("Engineering"));
+				.andExpect(jsonPath("$.department").value("Engineering"))
+				.andExpect(jsonPath("$.address").value("123 Main St, Newark NJ"));
 
 		mockMvc.perform(get("/api/employees/EMP-1001"))
 				.andExpect(status().isOk())
@@ -55,10 +57,28 @@ class DynamodbDemoApplicationTests {
 								{
 								  "employeeId": "EMPLOYEE-ID-IS-WAY-TOO-LONG",
 								  "name": "Asha Patel",
-								  "department": "Engineering"
+								  "department": "Engineering",
+								  "address": "123 Main St, Newark NJ"
 								}
 								"""))
 				.andExpect(status().isBadRequest());
+	}
+
+	@Test
+	void rejectsAddressWithUnsupportedSpecialCharacters() throws Exception {
+		for (String address : java.util.List.of("New_Jersey", "New:Jersey", "New;Jersey")) {
+			mockMvc.perform(post("/api/employees")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content("""
+									{
+									  "employeeId": "EMP-ADDR",
+									  "name": "Asha Patel",
+									  "department": "Engineering",
+									  "address": "%s"
+									}
+									""".formatted(address)))
+					.andExpect(status().isBadRequest());
+		}
 	}
 
 	@Test
@@ -81,7 +101,8 @@ class DynamodbDemoApplicationTests {
 								{
 								  "employeeId": "EMP-1003",
 								  "name": "Maya Shah",
-								  "department": "QA"
+								  "department": "QA",
+								  "address": "45 Market St, New Jersey"
 								}
 								"""))
 				.andExpect(status().isCreated());
