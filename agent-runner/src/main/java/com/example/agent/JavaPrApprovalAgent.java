@@ -110,6 +110,9 @@ public final class JavaPrApprovalAgent {
         String existing = run(repoDir, "git", "branch", "--list", branch).stdout().trim();
         if (existing.isBlank()) {
             run(repoDir, "git", "switch", "-c", branch);
+        } else if (hasChanges(repoDir, List.of())) {
+            throw new IllegalStateException("Fix branch already exists while local generated changes are pending: " + branch
+                    + ". Use a unique --branch value for this agent run.");
         } else {
             run(repoDir, "git", "switch", branch);
         }
