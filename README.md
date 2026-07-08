@@ -155,7 +155,9 @@ agent-config/agent-prompt.md
 
 `agent-prompt.md` describes the agent behavior and safety expectations. `project-config.json` defines concrete rules, such as which Java file/field/annotation to validate, what invalid payload should fail, and which AWS ECS service to monitor. To add another validation bug scenario, add another entry to `validationRules` instead of rewriting the Java agent.
 
-The main automation entry point is:
+The main automation entry point is `JavaOrchestratorAgent`. In the production-style Jenkins flow, this is not run for every normal code change. Jenkins builds, tests, deploys, and validates first. If validation fails, Jenkins rolls ECS back and then invokes the external agent runner to prepare a fix PR and approval email.
+
+Manual run:
 
 ```bash
 cd agent-runner
@@ -185,8 +187,8 @@ For a local/demo run without ECS monitoring:
 What it does:
 
 ```text
-monitor ECS
-auto-fix known validation issue
+optionally monitor ECS
+auto-fix configured validation issue
 run tests
 detect changed source files
 create GitHub PR
@@ -307,12 +309,40 @@ Normal Jenkins parameters:
 ```text
 IMAGE_TAG = blank
 FORCE_VALIDATION_FAILURE = false
+RUN_ECS_MONITOR = false
+AGENT_EMAIL_MODE = smtp
 ```
 
 Leaving `IMAGE_TAG` blank makes Jenkins use an immutable build tag like:
 
 ```text
 build-18
+```
+
+The normal Jenkins flow is:
+
+```text
+checkout source
+build Spring Boot app
+run tests
+build and push Docker image
+capture current ECS task definition
+deploy new ECS task definition
+validate deployed ECS service
+```
+
+If validation passes, Jenkins stops there and does not run the bug-fix agent.
+
+If validation fails, Jenkins does this:
+
+```text
+rollback ECS to the previously captured task definition
+validate rollback
+run agent-runner/JavaOrchestratorAgent
+apply configured source fix
+create GitHub PR
+send approval email
+fail the build so humans know approval is required
 ```
 
 ## Jenkins Shell Scripts
@@ -334,7 +364,8 @@ merge approved PR into main
 Jenkins detects the SCM change
 Jenkins builds and tests the Java application
 Jenkins runs the shell scripts to push/deploy/rollback
-Java validation and monitor agents verify the ECS deployment
+Java validation agent verifies the ECS deployment
+External agent runner is invoked only when validation fails
 ```
 
 Manual script runs are only for troubleshooting. For normal demo and project operation, run Jenkins.
