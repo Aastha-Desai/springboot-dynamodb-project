@@ -43,6 +43,8 @@ dynamodb-demo/
 
 agent-runner/
   src/main/java/...          External Java ECS monitor, auto-fix, PR/email, validation, and orchestrator agents
+  Dockerfile                 Separate agent container image
+  scripts/                   Local helper for running the agent container
   pom.xml                    Agent-only dependencies such as ECS, EC2, DynamoDB audit, and email
 ```
 
@@ -197,6 +199,34 @@ write audit records
 ```
 
 If there are no source changes, it will not create a PR or send an approval email.
+
+## Run The Agent As A Separate Container
+
+The agent runner can be packaged separately from the Spring Boot app. The image contains the compiled Java agents, and the repository is mounted into `/workspace` at runtime so the agent can inspect source, apply fixes, run tests, create PRs, and send approval email.
+
+Build the agent image:
+
+```bash
+cd agent-runner
+docker build -t agent-runner:local .
+```
+
+Run the orchestrator container from the repository root:
+
+```bash
+cd /Users/aasthadesai/springboot-dynamodb-project
+
+agent-runner/scripts/run-agent-container.sh \
+  --skip-monitor \
+  --config ../agent-config/project-config.json \
+  --repo-dir .. \
+  --project-dir ../dynamodb-demo \
+  --email-mode smtp \
+  --fix-branch agent-container-fix \
+  --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java
+```
+
+The helper passes through AWS, GitHub, and SMTP environment variables from your shell. In Jenkins or ECS, provide those values as job secrets or task environment variables instead of storing them in code.
 
 AWS ECS
 ``` bash
