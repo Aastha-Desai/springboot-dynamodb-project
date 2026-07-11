@@ -45,16 +45,29 @@ pipeline {
         }
       }
     }
-    stage('Test') {
-      steps {
-        dir('dynamodb-demo') {
-          sh './mvnw test -q'
-        }
-      }
-    }
     stage('Build Agent Runner Image') {
       steps {
         sh 'docker build -f agent-runner/Dockerfile -t "${AGENT_IMAGE}" .'
+      }
+    }
+    stage('Test') {
+      steps {
+        withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
+          script {
+            try {
+              dir('dynamodb-demo') {
+                sh './mvnw test -q'
+              }
+            } catch (testError) {
+              echo "Tests failed. Invoking external agent-runner container to prepare a fix PR and human approval email."
+              def baseBranch = env.BRANCH_NAME ?: 'main'
+              def fixBranch = "agent-test-fix-${env.BUILD_NUMBER}"
+              runAgentContainer('com.example.agent.JavaOrchestratorAgent',
+                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation test fix\" --pr-title \"Agent fix: restore validation rule\" --summary \"Jenkins tests failed, and the external Java agent container generated this PR for human approval.\"")
+              error "Tests failed; the external agent container was invoked for PR/email approval."
+            }
+          }
+        }
       }
     }
     stage('Build & Push Image') {
