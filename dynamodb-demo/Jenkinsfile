@@ -19,6 +19,7 @@ pipeline {
     SERVICE_NAME = "${params.SERVICE_NAME}"
     TASK_FAMILY = "${params.TASK_FAMILY}"
     AGENT_EMAIL_MODE = "${params.AGENT_EMAIL_MODE}"
+    AGENT_IMAGE = "agent-runner:build-${BUILD_NUMBER}"
     PREVIOUS_TASK_DEFINITION = ""
   }
   stages {
@@ -49,6 +50,11 @@ pipeline {
         dir('dynamodb-demo') {
           sh './mvnw test -q'
         }
+      }
+    }
+    stage('Build Agent Runner Image') {
+      steps {
+        sh 'docker build -t "${AGENT_IMAGE}" agent-runner'
       }
     }
     stage('Build & Push Image') {
@@ -100,32 +106,28 @@ pipeline {
     stage('Validate ECS Deployment') {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          dir('agent-runner') {
-            script {
-              def validationCommand = './mvnw -q compile exec:java -Dexec.mainClass=com.example.agent.JavaValidateEcsDeploymentAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit"'
-              if (params.FORCE_VALIDATION_FAILURE) {
-                validationCommand = './mvnw -q compile exec:java -Dexec.mainClass=com.example.agent.JavaValidateEcsDeploymentAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit --force-fail"'
-              }
-              try {
-                sh validationCommand
-              } catch (validationError) {
-                echo "Deployment validation failed. Rolling back ECS service to the captured previous task definition."
-                sh '''
-                  PREVIOUS_TASK_DEFINITION="$(cat ../.previous-task-definition)"
-                  ../dynamodb-demo/scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" AgentAudit
-                '''
-                sh './mvnw -q compile exec:java -Dexec.mainClass=com.example.agent.JavaValidateEcsDeploymentAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit"'
+          script {
+            def validationArgs = '--config ../agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
+            if (params.FORCE_VALIDATION_FAILURE) {
+              validationArgs = validationArgs + ' --force-fail'
+            }
+            try {
+              runAgentContainer('com.example.agent.JavaValidateEcsDeploymentAgent', validationArgs)
+            } catch (validationError) {
+              echo "Deployment validation failed. Rolling back ECS service to the captured previous task definition."
+              sh '''
+                PREVIOUS_TASK_DEFINITION="$(cat .previous-task-definition)"
+                dynamodb-demo/scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" AgentAudit
+              '''
+              runAgentContainer('com.example.agent.JavaValidateEcsDeploymentAgent',
+                  '--config ../agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
 
-                echo "Rollback validated. Invoking external agent-runner to prepare a fix PR and human approval email."
-                def baseBranch = env.BRANCH_NAME ?: 'main'
-                def fixBranch = "agent-validation-fix-${env.BUILD_NUMBER}"
-                sh """
-                  ./mvnw -q compile exec:java \
-                    -Dexec.mainClass=com.example.agent.JavaOrchestratorAgent \
-                    -Dexec.args='--skip-monitor --config ../agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message "fix: apply validation bug fix" --pr-title "Agent fix: restore validation rule" --summary "Jenkins validation failed, ECS was rolled back, and the external Java agent generated this PR for human approval."'
-                """
-                error "Deployment validation failed; ECS was rolled back and the external agent was invoked for PR/email approval."
-              }
+              echo "Rollback validated. Invoking external agent-runner container to prepare a fix PR and human approval email."
+              def baseBranch = env.BRANCH_NAME ?: 'main'
+              def fixBranch = "agent-validation-fix-${env.BUILD_NUMBER}"
+              runAgentContainer('com.example.agent.JavaOrchestratorAgent',
+                  "--skip-monitor --config ../agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation bug fix\" --pr-title \"Agent fix: restore validation rule\" --summary \"Jenkins validation failed, ECS was rolled back, and the external Java agent container generated this PR for human approval.\"")
+              error "Deployment validation failed; ECS was rolled back and the external agent container was invoked for PR/email approval."
             }
           }
         }
@@ -137,11 +139,38 @@ pipeline {
       }
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
-          dir('agent-runner') {
-            sh './mvnw -q compile exec:java -Dexec.mainClass=com.example.agent.JavaEcsMonitorAgent -Dexec.args="--region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit"'
+          script {
+            runAgentContainer('com.example.agent.JavaEcsMonitorAgent',
+                '--config ../agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
           }
         }
       }
     }
   }
+}
+
+def runAgentContainer(String mainClass, String args) {
+  sh """
+    docker run --rm \
+      --user "\$(id -u):\$(id -g)" \
+      -e HOME=/tmp \
+      -e AGENT_MAIN_CLASS="${mainClass}" \
+      -e AWS_ACCESS_KEY_ID \
+      -e AWS_SECRET_ACCESS_KEY \
+      -e AWS_SESSION_TOKEN \
+      -e AWS_REGION="${env.AWS_REGION}" \
+      -e GITHUB_TOKEN \
+      -e GH_TOKEN \
+      -e APPROVAL_EMAIL_TO \
+      -e EMAIL_FROM \
+      -e SMTP_HOST \
+      -e SMTP_PORT \
+      -e SMTP_USERNAME \
+      -e SMTP_PASSWORD \
+      -e GIT_AUTHOR_NAME \
+      -e GIT_AUTHOR_EMAIL \
+      -v "\${WORKSPACE}:/workspace" \
+      -w /workspace/agent-runner \
+      "${env.AGENT_IMAGE}" ${args}
+  """
 }
