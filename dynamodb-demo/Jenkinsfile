@@ -54,7 +54,7 @@ pipeline {
     }
     stage('Build Agent Runner Image') {
       steps {
-        sh 'docker build -t "${AGENT_IMAGE}" agent-runner'
+        sh 'docker build -f agent-runner/Dockerfile -t "${AGENT_IMAGE}" .'
       }
     }
     stage('Build & Push Image') {
@@ -107,7 +107,7 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           script {
-            def validationArgs = '--config ../agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
+            def validationArgs = '--config /opt/agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
             if (params.FORCE_VALIDATION_FAILURE) {
               validationArgs = validationArgs + ' --force-fail'
             }
@@ -120,13 +120,13 @@ pipeline {
                 dynamodb-demo/scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" AgentAudit
               '''
               runAgentContainer('com.example.agent.JavaValidateEcsDeploymentAgent',
-                  '--config ../agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
+                  '--config /opt/agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
 
               echo "Rollback validated. Invoking external agent-runner container to prepare a fix PR and human approval email."
               def baseBranch = env.BRANCH_NAME ?: 'main'
               def fixBranch = "agent-validation-fix-${env.BUILD_NUMBER}"
               runAgentContainer('com.example.agent.JavaOrchestratorAgent',
-                  "--skip-monitor --config ../agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation bug fix\" --pr-title \"Agent fix: restore validation rule\" --summary \"Jenkins validation failed, ECS was rolled back, and the external Java agent container generated this PR for human approval.\"")
+                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation bug fix\" --pr-title \"Agent fix: restore validation rule\" --summary \"Jenkins validation failed, ECS was rolled back, and the external Java agent container generated this PR for human approval.\"")
               error "Deployment validation failed; ECS was rolled back and the external agent container was invoked for PR/email approval."
             }
           }
@@ -141,7 +141,7 @@ pipeline {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           script {
             runAgentContainer('com.example.agent.JavaEcsMonitorAgent',
-                '--config ../agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
+                '--config /opt/agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
           }
         }
       }
