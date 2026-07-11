@@ -181,6 +181,9 @@ def runAgentContainer(String mainClass, String args) {
       -e SMTP_PASSWORD \
       -e GIT_AUTHOR_NAME \
       -e GIT_AUTHOR_EMAIL \
+      -e GIT_CONFIG_COUNT=1 \
+      -e GIT_CONFIG_KEY_0=safe.directory \
+      -e GIT_CONFIG_VALUE_0=/workspace \
       -w /workspace/agent-runner \
       "${env.AGENT_IMAGE}" ${args})"
 
