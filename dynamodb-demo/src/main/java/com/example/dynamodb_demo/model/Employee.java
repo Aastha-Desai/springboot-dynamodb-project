@@ -2,7 +2,6 @@ package com.example.dynamodb_demo.model;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -28,7 +27,6 @@ public class Employee {
     private String department;
 
     @NotBlank
-    @Pattern(regexp = "^[a-zA-Z0-9 ,.-]+$", message = "address contains invalid characters")
     @Schema(description = "Employee address. Allows letters, numbers, spaces, comma, period, and dash.", example = "123 Main St, Newark NJ")
     private String address;
 }
