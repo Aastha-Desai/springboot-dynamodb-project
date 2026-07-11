@@ -355,10 +355,11 @@ The normal Jenkins flow is:
 checkout source
 build Spring Boot app
 run tests
+build separate agent-runner Docker image
 build and push Docker image
 capture current ECS task definition
 deploy new ECS task definition
-validate deployed ECS service
+validate deployed ECS service through the agent container
 ```
 
 If validation passes, Jenkins stops there and does not run the bug-fix agent.
@@ -368,7 +369,7 @@ If validation fails, Jenkins does this:
 ```text
 rollback ECS to the previously captured task definition
 validate rollback
-run agent-runner/JavaOrchestratorAgent
+run agent-runner container with JavaOrchestratorAgent
 apply configured source fix
 create GitHub PR
 send approval email
@@ -386,6 +387,8 @@ scripts/ecr_login_and_push.sh    Build & Push Image stage
 scripts/deploy_ecs.sh            Deploy to ECS stage
 scripts/rollback_ecs.sh          Rollback path when validation fails
 ```
+
+Jenkins also builds the separate `agent-runner` Docker image and uses `docker run` for Java validation, optional ECS monitoring, and the failure-triggered PR/email orchestrator. That keeps the agent runtime outside of the Spring Boot application container.
 
 The expected production-style flow is:
 

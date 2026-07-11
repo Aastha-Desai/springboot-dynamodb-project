@@ -62,10 +62,9 @@ public final class JavaPrApprovalAgent {
 
         ensureBranch(repoDir, branch, dryRun);
         boolean committed = commitChanges(repoDir, paths, commitMessage, dryRun);
-        pushBranch(repoDir, remote, branch, dryRun);
-
         GitHubRepo repo = resolveGitHubRepo(repoDir, remote, parsed.get("github-repo", ""));
         String token = env("GITHUB_TOKEN", env("GH_TOKEN", "")).trim();
+        pushBranch(repoDir, remote, repo, token, branch, dryRun);
         String prUrl;
         if (dryRun) {
             prUrl = fallbackPrUrl(repo, branch);
@@ -140,8 +139,20 @@ public final class JavaPrApprovalAgent {
             System.out.println("No staged changes to commit.");
             return false;
         }
+        ensureGitIdentity(repoDir);
         run(repoDir, "git", "commit", "-m", message);
         return true;
+    }
+
+    private static void ensureGitIdentity(Path repoDir) throws IOException, InterruptedException {
+        String email = AgentSupport.run(repoDir, List.of("git", "config", "--get", "user.email"), false).stdout().trim();
+        if (email.isBlank()) {
+            run(repoDir, "git", "config", "user.email", env("GIT_AUTHOR_EMAIL", "agent@example.com"));
+        }
+        String name = AgentSupport.run(repoDir, List.of("git", "config", "--get", "user.name"), false).stdout().trim();
+        if (name.isBlank()) {
+            run(repoDir, "git", "config", "user.name", env("GIT_AUTHOR_NAME", "Java Agent Runner"));
+        }
     }
 
     static boolean hasChanges(Path repoDir, List<String> paths) throws IOException, InterruptedException {
@@ -153,13 +164,19 @@ public final class JavaPrApprovalAgent {
         return !AgentSupport.run(repoDir, command, true).stdout().trim().isBlank();
     }
 
-    private static void pushBranch(Path repoDir, String remote, String branch, boolean dryRun)
+    private static void pushBranch(Path repoDir, String remote, GitHubRepo repo, String token, String branch, boolean dryRun)
             throws IOException, InterruptedException {
         if (dryRun) {
             System.out.printf("Dry-run: would push %s to %s%n", branch, remote);
             return;
         }
-        run(repoDir, "git", "push", "-u", remote, branch);
+        if (token.isBlank()) {
+            run(repoDir, "git", "push", "-u", remote, branch);
+            return;
+        }
+        String authenticatedRemote = "https://x-access-token:%s@github.com/%s/%s.git"
+                .formatted(urlEncodeToken(token), repo.owner(), repo.name());
+        run(repoDir, "git", "push", "-u", authenticatedRemote, branch);
     }
 
     private static GitHubRepo resolveGitHubRepo(Path repoDir, String remote, String explicit)
@@ -310,6 +327,10 @@ public final class JavaPrApprovalAgent {
 
     private static String encode(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private static String urlEncodeToken(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 
     record GitHubRepo(String owner, String name) {

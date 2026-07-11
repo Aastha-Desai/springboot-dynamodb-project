@@ -1,5 +1,7 @@
 FROM amazoncorretto:17-alpine AS build
 
+RUN apk add --no-cache bash curl git
+
 WORKDIR /build/agent-runner
 COPY pom.xml mvnw ./
 COPY .mvn .mvn
@@ -9,6 +11,8 @@ RUN chmod +x mvnw
 RUN ./mvnw -B -DskipTests package dependency:copy-dependencies -DincludeScope=runtime
 
 FROM amazoncorretto:17-alpine
+
+RUN apk add --no-cache bash curl git
 
 WORKDIR /workspace/agent-runner
 
