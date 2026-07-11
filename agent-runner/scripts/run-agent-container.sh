@@ -5,8 +5,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 IMAGE_NAME="${AGENT_IMAGE_NAME:-agent-runner:local}"
 
-cd "${REPO_ROOT}/agent-runner"
-docker build -t "${IMAGE_NAME}" .
+cd "${REPO_ROOT}"
+docker build -f agent-runner/Dockerfile -t "${IMAGE_NAME}" .
 
 docker run --rm \
   -v "${REPO_ROOT}:/workspace" \

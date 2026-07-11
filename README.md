@@ -207,8 +207,8 @@ The agent runner can be packaged separately from the Spring Boot app. The image 
 Build the agent image:
 
 ```bash
-cd agent-runner
-docker build -t agent-runner:local .
+cd /Users/aasthadesai/springboot-dynamodb-project
+docker build -f agent-runner/Dockerfile -t agent-runner:local .
 ```
 
 Run the orchestrator container from the repository root:
@@ -218,7 +218,7 @@ cd /Users/aasthadesai/springboot-dynamodb-project
 
 agent-runner/scripts/run-agent-container.sh \
   --skip-monitor \
-  --config ../agent-config/project-config.json \
+  --config /opt/agent-config/project-config.json \
   --repo-dir .. \
   --project-dir ../dynamodb-demo \
   --email-mode smtp \
