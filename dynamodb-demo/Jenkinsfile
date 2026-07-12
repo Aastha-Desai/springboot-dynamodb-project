@@ -63,9 +63,8 @@ pipeline {
             } catch (testError) {
               echo "Tests failed. Invoking external agent-runner container to prepare a fix PR and human approval email."
               def baseBranch = env.BRANCH_NAME ?: 'main'
-              def fixBranch = "agent-test-fix-${env.BUILD_NUMBER}"
               runAgentContainer('com.example.agent.JavaOrchestratorAgent',
-                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation test fix\" --pr-title \"Agent fix: restore validation rule\" --summary \"Jenkins tests failed, and the external Java agent container generated this PR for human approval.\"")
+                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation test fix\" --summary \"Jenkins tests failed, and the external Java agent container generated this PR for human approval.\"")
               error "Tests failed; the external agent container was invoked for PR/email approval."
             }
           }
@@ -139,9 +138,8 @@ pipeline {
 
               echo "Rollback validated. Invoking external agent-runner container to prepare a fix PR and human approval email."
               def baseBranch = env.BRANCH_NAME ?: 'main'
-              def fixBranch = "agent-validation-fix-${env.BUILD_NUMBER}"
               runAgentContainer('com.example.agent.JavaOrchestratorAgent',
-                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --fix-branch ${fixBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation bug fix\" --pr-title \"Agent fix: restore validation rule\" --summary \"Jenkins validation failed, ECS was rolled back, and the external Java agent container generated this PR for human approval.\"")
+                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation bug fix\" --summary \"Jenkins validation failed, ECS was rolled back, and the external Java agent container generated this PR for human approval.\"")
               error "Deployment validation failed; ECS was rolled back and the external agent container was invoked for PR/email approval."
             }
           }
