@@ -20,6 +20,8 @@ pipeline {
     TASK_FAMILY = "${params.TASK_FAMILY}"
     AGENT_EMAIL_MODE = "${params.AGENT_EMAIL_MODE}"
     AGENT_IMAGE = "agent-runner:build-${BUILD_NUMBER}"
+    SMTP_HOST = "smtp.gmail.com"
+    SMTP_PORT = "587"
     PREVIOUS_TASK_DEFINITION = ""
   }
   stages {
@@ -163,39 +165,47 @@ pipeline {
 }
 
 def runAgentContainer(String mainClass, String args) {
-  sh """
-    AGENT_CONTAINER_ID="\$(docker create \
-      -e HOME=/tmp \
-      -e AGENT_MAIN_CLASS="${mainClass}" \
-      -e AWS_ACCESS_KEY_ID \
-      -e AWS_SECRET_ACCESS_KEY \
-      -e AWS_SESSION_TOKEN \
-      -e AWS_REGION="${env.AWS_REGION}" \
-      -e GITHUB_TOKEN \
-      -e GH_TOKEN \
-      -e APPROVAL_EMAIL_TO \
-      -e EMAIL_FROM \
-      -e SMTP_HOST \
-      -e SMTP_PORT \
-      -e SMTP_USERNAME \
-      -e SMTP_PASSWORD \
-      -e GIT_AUTHOR_NAME \
-      -e GIT_AUTHOR_EMAIL \
-      -e GIT_CONFIG_COUNT=1 \
-      -e GIT_CONFIG_KEY_0=safe.directory \
-      -e GIT_CONFIG_VALUE_0=/workspace \
-      -w /workspace/agent-runner \
-      "${env.AGENT_IMAGE}" ${args})"
+  withCredentials([
+    string(credentialsId: 'github-token', variable: 'GITHUB_TOKEN'),
+    string(credentialsId: 'approval-email-to', variable: 'APPROVAL_EMAIL_TO'),
+    string(credentialsId: 'email-from', variable: 'EMAIL_FROM'),
+    string(credentialsId: 'smtp-username', variable: 'SMTP_USERNAME'),
+    string(credentialsId: 'smtp-password', variable: 'SMTP_PASSWORD')
+  ]) {
+    sh """
+      AGENT_CONTAINER_ID="\$(docker create \
+        -e HOME=/tmp \
+        -e AGENT_MAIN_CLASS="${mainClass}" \
+        -e AWS_ACCESS_KEY_ID \
+        -e AWS_SECRET_ACCESS_KEY \
+        -e AWS_SESSION_TOKEN \
+        -e AWS_REGION="${env.AWS_REGION}" \
+        -e GITHUB_TOKEN \
+        -e GH_TOKEN \
+        -e APPROVAL_EMAIL_TO \
+        -e EMAIL_FROM \
+        -e SMTP_HOST="${env.SMTP_HOST}" \
+        -e SMTP_PORT="${env.SMTP_PORT}" \
+        -e SMTP_USERNAME \
+        -e SMTP_PASSWORD \
+        -e GIT_AUTHOR_NAME \
+        -e GIT_AUTHOR_EMAIL \
+        -e GIT_CONFIG_COUNT=1 \
+        -e GIT_CONFIG_KEY_0=safe.directory \
+        -e GIT_CONFIG_VALUE_0=/workspace \
+        -w /workspace/agent-runner \
+        "${env.AGENT_IMAGE}" ${args})"
 
-    cleanup_agent_container() {
-      docker rm -f "\${AGENT_CONTAINER_ID}" >/dev/null 2>&1 || true
-    }
-    trap cleanup_agent_container EXIT
+      cleanup_agent_container() {
+        docker rm -f "\${AGENT_CONTAINER_ID}" >/dev/null 2>&1 || true
+      }
+      trap cleanup_agent_container EXIT
 
-    docker cp "\${WORKSPACE}/." "\${AGENT_CONTAINER_ID}:/workspace"
-    docker start -a "\${AGENT_CONTAINER_ID}"
-    AGENT_EXIT_CODE="\$(docker inspect "\${AGENT_CONTAINER_ID}" --format '{{.State.ExitCode}}')"
-    docker cp "\${AGENT_CONTAINER_ID}:/workspace/." "\${WORKSPACE}/" >/dev/null 2>&1 || true
-    exit "\${AGENT_EXIT_CODE}"
-  """
+      docker cp "\${WORKSPACE}/." "\${AGENT_CONTAINER_ID}:/workspace"
+      docker start -a "\${AGENT_CONTAINER_ID}"
+      AGENT_EXIT_CODE="\$(docker inspect "\${AGENT_CONTAINER_ID}" --format '{{.State.ExitCode}}')"
+      docker cp "\${AGENT_CONTAINER_ID}:/workspace/." "\${WORKSPACE}/" >/dev/null 2>&1 || true
+      exit "\${AGENT_EXIT_CODE}"
+    """
+  }
 }
