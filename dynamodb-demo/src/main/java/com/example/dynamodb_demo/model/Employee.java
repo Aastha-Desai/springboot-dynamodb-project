@@ -2,11 +2,11 @@ package com.example.dynamodb_demo.model;
 
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import jakarta.validation.constraints.Pattern;
 
 @Data
 @NoArgsConstructor
@@ -20,7 +20,8 @@ public class Employee {
     private String employeeId;
 
     @NotBlank
-    @Schema(description = "Employee name", example = "Asha Patel")
+    @Pattern(regexp = "^[a-zA-Z .'-]+$", message = "name contains invalid characters")
+    @Schema(description = "Employee name. Allows letters, spaces, period, apostrophe, and dash.", example = "Asha Patel")
     private String name;
 
     @NotBlank

@@ -82,6 +82,23 @@ class DynamodbDemoApplicationTests {
 	}
 
 	@Test
+	void rejectsNameWithUnsupportedSpecialCharacters() throws Exception {
+		for (String name : java.util.List.of("Asha_123", "Asha:Patel", "Asha;Patel")) {
+			mockMvc.perform(post("/api/employees")
+							.contentType(MediaType.APPLICATION_JSON)
+							.content("""
+									{
+									  "employeeId": "EMP-NAME",
+									  "name": "%s",
+									  "department": "Engineering",
+									  "address": "123 Main St, Newark NJ"
+									}
+									""".formatted(name)))
+					.andExpect(status().isBadRequest());
+		}
+	}
+
+	@Test
 	void rejectsMissingRequiredFields() throws Exception {
 		mockMvc.perform(post("/api/employees")
 						.contentType(MediaType.APPLICATION_JSON)

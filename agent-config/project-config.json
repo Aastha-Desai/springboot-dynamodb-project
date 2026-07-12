@@ -16,6 +16,24 @@
   ],
   "validationRules": [
     {
+      "name": "employee-name-special-character-validation",
+      "type": "java-field-annotation",
+      "file": "src/main/java/com/example/dynamodb_demo/model/Employee.java",
+      "field": "name",
+      "requiredImport": "jakarta.validation.constraints.Pattern",
+      "annotation": "@Pattern(regexp = \"^[a-zA-Z .'-]+$\", message = \"name contains invalid characters\")",
+      "bugType": "VALIDATION",
+      "severity": "MEDIUM",
+      "validationEndpoint": "/api/employees",
+      "expectedFailureStatus": 400,
+      "invalidPayload": {
+        "employeeId": "EMP-NAME-BAD",
+        "name": "Asha_123",
+        "department": "Quality",
+        "address": "123 Main St, Newark NJ"
+      }
+    },
+    {
       "name": "employee-address-special-character-validation",
       "type": "java-field-annotation",
       "file": "src/main/java/com/example/dynamodb_demo/model/Employee.java",
