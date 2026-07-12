@@ -66,6 +66,32 @@ public final class JavaPrApprovalAgent {
             String existingPr = findExistingPrOptional(repo, branch, baseBranch, token);
             if (!existingPr.isBlank()) {
                 System.out.println("Existing open PR found, not creating duplicate: " + existingPr);
+                if (hasMergeConflict(repoDir, remote, baseBranch, branch)) {
+                    String conflictSummary = """
+                            Existing agent PR has merge conflicts and needs human resolution before approval.
+
+                            Existing PR:
+                            %s
+
+                            Base branch:
+                            %s
+
+                            Fix branch:
+                            %s
+                            """.formatted(existingPr, baseBranch, branch);
+                    System.out.println("Merge conflict detected for existing PR. Human action required: " + existingPr);
+                    audit(region, auditTable, "PR_MERGE_CONFLICT_DETECTED", "HUMAN_ACTION_REQUIRED",
+                            conflictSummary, existingPr, skipAudit);
+                    boolean emailSent = sendEmail("Manual conflict resolution required for agent bug fix",
+                            emailBody(projectName, existingPr, conflictSummary), emailMode, false, repoDir.resolve(outboxFile));
+                    audit(region, auditTable,
+                            emailSent ? "EMAIL_NOTIFICATION_SENT" : "EMAIL_NOTIFICATION_PREPARED",
+                            emailSent ? "SENT" : "SMTP_CONFIGURATION_REQUIRED",
+                            "Human conflict notification " + (emailSent ? "sent" : "prepared") + " for existing PR " + existingPr,
+                            existingPr,
+                            skipAudit);
+                    return 0;
+                }
                 audit(region, auditTable, "PR_REUSED", "WAITING_FOR_HUMAN_APPROVAL", existingPr, existingPr, skipAudit);
                 String body = emailBody(projectName, existingPr, summary);
                 boolean emailSent = sendEmail(emailSubject, body, emailMode, false, repoDir.resolve(outboxFile));
@@ -252,6 +278,34 @@ public final class JavaPrApprovalAgent {
         }
         Matcher matcher = HTML_URL.matcher(response.body());
         return matcher.find() ? matcher.group(1).replace("\\/", "/") : "";
+    }
+
+    private static boolean hasMergeConflict(Path repoDir, String remote, String baseBranch, String branch)
+            throws IOException, InterruptedException {
+        AgentSupport.CommandResult fetchBase = AgentSupport.run(repoDir,
+                List.of(
+                        "git",
+                        "fetch",
+                        remote,
+                        "+refs/heads/%s:refs/remotes/%s/%s".formatted(baseBranch, remote, baseBranch),
+                        "+refs/heads/%s:refs/remotes/%s/%s".formatted(branch, remote, branch)),
+                false);
+        if (fetchBase.exitCode() != 0) {
+            String detail = fetchBase.stderr().isBlank() ? fetchBase.stdout() : fetchBase.stderr();
+            throw new IllegalStateException("Could not fetch branches for merge conflict check: " + detail.trim());
+        }
+
+        String baseRef = "refs/remotes/%s/%s".formatted(remote, baseBranch);
+        String branchRef = "refs/remotes/%s/%s".formatted(remote, branch);
+        AgentSupport.CommandResult mergeCheck = AgentSupport.run(repoDir,
+                List.of("git", "merge-tree", "--write-tree", baseRef, branchRef), false);
+        if (mergeCheck.exitCode() == 0) {
+            System.out.println("Existing PR branch can merge cleanly with " + baseBranch + ".");
+            return false;
+        }
+        System.out.println("Merge conflict check failed: "
+                + (mergeCheck.stderr().isBlank() ? mergeCheck.stdout().trim() : mergeCheck.stderr().trim()));
+        return true;
     }
 
     private static boolean sendEmail(String subject, String body, String mode, boolean dryRun, Path outbox)
