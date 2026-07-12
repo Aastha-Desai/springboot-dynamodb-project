@@ -425,7 +425,27 @@ The build may end as failed during this forced test. That is expected because th
 
 ## Audit Check
 
-Check `AgentAudit`:
+For demo proof, use the Java audit report agent. It reads the same DynamoDB `AgentAudit` table that the monitor, auto-fix, PR/email, validation, and rollback steps write to.
+
+```bash
+cd agent-runner
+
+./mvnw -q compile exec:java \
+  -Dexec.mainClass=com.example.agent.JavaAuditReportAgent \
+  -Dexec.args='--region us-east-1 --audit-table AgentAudit --limit 25'
+```
+
+Expected output is a timeline of recent actions:
+
+```text
+eventTime              eventType                    status                   source             message
+2026-...               EMAIL_NOTIFICATION_SENT       SENT                     java-pr-agent      Human approval email sent...
+2026-...               PR_CREATED                    WAITING_FOR_HUMAN...     java-pr-agent      https://github.com/...
+2026-...               DEPLOYMENT_ROLLED_BACK        ROLLED_BACK              deployment-rol...   Rolled back ECS service...
+2026-...               DEPLOYMENT_VALIDATION_FAILED  FAILED                   java-validate...    Deployment validation failed...
+```
+
+You can also inspect raw DynamoDB records directly:
 
 ```bash
 AWS_PAGER="" aws dynamodb scan \
