@@ -60,10 +60,27 @@ public final class JavaPrApprovalAgent {
 
         System.out.printf("[%s] Java PR approval agent preparing branch %s%n", AgentSupport.utcNow(), branch);
 
-        ensureBranch(repoDir, branch, dryRun);
-        boolean committed = commitChanges(repoDir, paths, commitMessage, dryRun);
         GitHubRepo repo = resolveGitHubRepo(repoDir, remote, parsed.get("github-repo", ""));
         String token = env("GITHUB_TOKEN", env("GH_TOKEN", "")).trim();
+        if (!dryRun && !token.isBlank()) {
+            String existingPr = findExistingPrOptional(repo, branch, baseBranch, token);
+            if (!existingPr.isBlank()) {
+                System.out.println("Existing open PR found, not creating duplicate: " + existingPr);
+                audit(region, auditTable, "PR_REUSED", "WAITING_FOR_HUMAN_APPROVAL", existingPr, existingPr, skipAudit);
+                String body = emailBody(projectName, existingPr, summary);
+                boolean emailSent = sendEmail(emailSubject, body, emailMode, false, repoDir.resolve(outboxFile));
+                audit(region, auditTable,
+                        emailSent ? "EMAIL_NOTIFICATION_SENT" : "EMAIL_NOTIFICATION_PREPARED",
+                        emailSent ? "SENT" : "SMTP_CONFIGURATION_REQUIRED",
+                        "Human approval notification " + (emailSent ? "sent" : "prepared") + " for existing PR " + existingPr,
+                        existingPr,
+                        skipAudit);
+                return 0;
+            }
+        }
+
+        ensureBranch(repoDir, branch, dryRun);
+        boolean committed = commitChanges(repoDir, paths, commitMessage, dryRun);
         pushBranch(repoDir, remote, repo, token, branch, dryRun);
         String prUrl;
         if (dryRun) {
@@ -211,12 +228,15 @@ public final class JavaPrApprovalAgent {
             return htmlUrl(response.body());
         }
         if (response.statusCode() == 422 && response.body().toLowerCase().contains("pull request already exists")) {
-            return findExistingPr(repo, head, base, token);
+            String existingPr = findExistingPrOptional(repo, head, base, token);
+            if (!existingPr.isBlank()) {
+                return existingPr;
+            }
         }
         throw new IllegalStateException("GitHub PR creation failed HTTP " + response.statusCode() + ": " + response.body());
     }
 
-    private static String findExistingPr(GitHubRepo repo, String head, String base, String token)
+    private static String findExistingPrOptional(GitHubRepo repo, String head, String base, String token)
             throws IOException, InterruptedException {
         String query = "head=" + encode(repo.owner() + ":" + head) + "&base=" + encode(base) + "&state=open";
         HttpRequest request = HttpRequest.newBuilder()
@@ -230,7 +250,8 @@ public final class JavaPrApprovalAgent {
         if (response.statusCode() != 200) {
             throw new IllegalStateException("GitHub existing PR lookup failed HTTP " + response.statusCode() + ": " + response.body());
         }
-        return htmlUrl(response.body());
+        Matcher matcher = HTML_URL.matcher(response.body());
+        return matcher.find() ? matcher.group(1).replace("\\/", "/") : "";
     }
 
     private static boolean sendEmail(String subject, String body, String mode, boolean dryRun, Path outbox)
