@@ -1,11 +1,19 @@
 pipeline {
   agent any
+  options {
+    disableConcurrentBuilds()
+    timeout(time: 60, unit: 'MINUTES')
+    buildDiscarder(logRotator(numToKeepStr: '20'))
+  }
   parameters {
     string(name: 'AWS_ACCOUNT_ID', defaultValue: '464868388928', description: 'AWS account id')
     string(name: 'ECR_REPO', defaultValue: 'dynamodb-demo', description: 'ECR repository name')
     string(name: 'CLUSTER_NAME', defaultValue: 'dynamodb-demo-cluster', description: 'ECS cluster name')
     string(name: 'SERVICE_NAME', defaultValue: 'dynamodb-demo-service', description: 'ECS service name')
     string(name: 'TASK_FAMILY', defaultValue: 'dynamodb-demo-task', description: 'ECS task family')
+    string(name: 'AUDIT_TABLE', defaultValue: 'AgentAudit', description: 'DynamoDB audit table name')
+    string(name: 'AGENT_CONFIG_PATH', defaultValue: '/opt/agent-config/project-config.json', description: 'Agent config path inside the agent container')
+    string(name: 'AGENT_SOURCE_PATHS', defaultValue: 'dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java', description: 'Space-separated source paths the agent is allowed to commit')
     string(name: 'IMAGE_TAG', defaultValue: '', description: 'Optional Docker image tag. Leave blank to use a build-specific immutable tag.')
     string(name: 'AGENT_EMAIL_MODE', defaultValue: 'smtp', description: 'Agent email mode when validation fails: smtp, preview, or auto')
     booleanParam(name: 'RUN_ECS_MONITOR', defaultValue: false, description: 'Optional manual ECS monitor check. Normal builds only invoke the agent after validation fails.')
@@ -18,6 +26,9 @@ pipeline {
     CLUSTER_NAME = "${params.CLUSTER_NAME}"
     SERVICE_NAME = "${params.SERVICE_NAME}"
     TASK_FAMILY = "${params.TASK_FAMILY}"
+    AUDIT_TABLE = "${params.AUDIT_TABLE}"
+    AGENT_CONFIG_PATH = "${params.AGENT_CONFIG_PATH}"
+    AGENT_SOURCE_PATHS = "${params.AGENT_SOURCE_PATHS}"
     AGENT_EMAIL_MODE = "${params.AGENT_EMAIL_MODE}"
     AGENT_IMAGE = "agent-runner:build-${BUILD_NUMBER}"
     SMTP_HOST = "smtp.gmail.com"
@@ -64,7 +75,7 @@ pipeline {
               echo "Tests failed. Invoking external agent-runner container to prepare a fix PR and human approval email."
               def baseBranch = env.BRANCH_NAME ?: 'main'
               runAgentContainer('com.example.agent.JavaOrchestratorAgent',
-                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation test fix\" --summary \"Jenkins tests failed, and the external Java agent container generated this PR for human approval.\"")
+                  "--skip-monitor --config ${env.AGENT_CONFIG_PATH} --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table ${env.AUDIT_TABLE} --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --paths ${env.AGENT_SOURCE_PATHS} --commit-message \"fix: apply validation test fix\" --summary \"Jenkins tests failed, and the external Java agent container generated this PR for human approval.\"")
               error "Tests failed; the external agent container was invoked for PR/email approval."
             }
           }
@@ -121,7 +132,7 @@ pipeline {
       steps {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           script {
-            def validationArgs = '--config /opt/agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit'
+            def validationArgs = "--config ${env.AGENT_CONFIG_PATH} --region ${env.AWS_REGION} --cluster ${env.CLUSTER_NAME} --service ${env.SERVICE_NAME} --audit-table ${env.AUDIT_TABLE}"
             if (params.FORCE_VALIDATION_FAILURE) {
               validationArgs = validationArgs + ' --force-fail'
             }
@@ -131,15 +142,15 @@ pipeline {
               echo "Deployment validation failed. Rolling back ECS service to the captured previous task definition."
               sh '''
                 PREVIOUS_TASK_DEFINITION="$(cat .previous-task-definition)"
-                dynamodb-demo/scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" AgentAudit
+                dynamodb-demo/scripts/rollback_ecs.sh "${AWS_REGION}" "${CLUSTER_NAME}" "${SERVICE_NAME}" "${PREVIOUS_TASK_DEFINITION}" "${AUDIT_TABLE}"
               '''
               runAgentContainer('com.example.agent.JavaValidateEcsDeploymentAgent',
-                  '--config /opt/agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
+                  "--config ${env.AGENT_CONFIG_PATH} --region ${env.AWS_REGION} --cluster ${env.CLUSTER_NAME} --service ${env.SERVICE_NAME} --audit-table ${env.AUDIT_TABLE}")
 
               echo "Rollback validated. Invoking external agent-runner container to prepare a fix PR and human approval email."
               def baseBranch = env.BRANCH_NAME ?: 'main'
               runAgentContainer('com.example.agent.JavaOrchestratorAgent',
-                  "--skip-monitor --config /opt/agent-config/project-config.json --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table AgentAudit --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --paths dynamodb-demo/src/main/java/com/example/dynamodb_demo/model/Employee.java --commit-message \"fix: apply validation bug fix\" --summary \"Jenkins validation failed, ECS was rolled back, and the external Java agent container generated this PR for human approval.\"")
+                  "--skip-monitor --config ${env.AGENT_CONFIG_PATH} --repo-dir .. --project-dir ../dynamodb-demo --region ${env.AWS_REGION} --audit-table ${env.AUDIT_TABLE} --email-mode ${env.AGENT_EMAIL_MODE} --base-branch ${baseBranch} --paths ${env.AGENT_SOURCE_PATHS} --commit-message \"fix: apply validation bug fix\" --summary \"Jenkins validation failed, ECS was rolled back, and the external Java agent container generated this PR for human approval.\"")
               error "Deployment validation failed; ECS was rolled back and the external agent container was invoked for PR/email approval."
             }
           }
@@ -154,10 +165,15 @@ pipeline {
         withCredentials([usernamePassword(credentialsId: 'aws', usernameVariable: 'AWS_ACCESS_KEY_ID', passwordVariable: 'AWS_SECRET_ACCESS_KEY')]) {
           script {
             runAgentContainer('com.example.agent.JavaEcsMonitorAgent',
-                '--config /opt/agent-config/project-config.json --region ${AWS_REGION} --cluster ${CLUSTER_NAME} --service ${SERVICE_NAME} --audit-table AgentAudit')
+                "--config ${env.AGENT_CONFIG_PATH} --region ${env.AWS_REGION} --cluster ${env.CLUSTER_NAME} --service ${env.SERVICE_NAME} --audit-table ${env.AUDIT_TABLE}")
           }
         }
       }
+    }
+  }
+  post {
+    always {
+      sh 'docker rmi "${AGENT_IMAGE}" >/dev/null 2>&1 || true'
     }
   }
 }
@@ -178,6 +194,7 @@ def runAgentContainer(String mainClass, String args) {
         -e AWS_SECRET_ACCESS_KEY \
         -e AWS_SESSION_TOKEN \
         -e AWS_REGION="${env.AWS_REGION}" \
+        -e BUILD_NUMBER="${env.BUILD_NUMBER}" \
         -e GITHUB_TOKEN \
         -e GH_TOKEN \
         -e APPROVAL_EMAIL_TO \

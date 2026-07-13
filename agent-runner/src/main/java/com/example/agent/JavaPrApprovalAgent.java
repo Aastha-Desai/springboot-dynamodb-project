@@ -105,7 +105,7 @@ public final class JavaPrApprovalAgent {
             }
         }
 
-        ensureBranch(repoDir, branch, dryRun);
+        branch = ensureBranch(repoDir, branch, dryRun);
         boolean committed = commitChanges(repoDir, paths, commitMessage, dryRun);
         pushBranch(repoDir, remote, repo, token, branch, dryRun);
         String prUrl;
@@ -140,24 +140,39 @@ public final class JavaPrApprovalAgent {
         return 0;
     }
 
-    private static void ensureBranch(Path repoDir, String branch, boolean dryRun) throws IOException, InterruptedException {
+    private static String ensureBranch(Path repoDir, String branch, boolean dryRun) throws IOException, InterruptedException {
         String current = run(repoDir, "git", "branch", "--show-current").stdout().trim();
         if (current.equals(branch)) {
-            return;
+            return branch;
         }
         if (dryRun) {
             System.out.println("Dry-run: would create/switch to branch " + branch);
-            return;
+            return branch;
         }
         String existing = run(repoDir, "git", "branch", "--list", branch).stdout().trim();
         if (existing.isBlank()) {
             run(repoDir, "git", "switch", "-c", branch);
+            return branch;
         } else if (hasChanges(repoDir, List.of())) {
-            throw new IllegalStateException("Fix branch already exists while local generated changes are pending: " + branch
-                    + ". Use a unique --branch value for this agent run.");
+            String uniqueBranch = uniqueBranchName(branch);
+            System.out.println("Fix branch already exists, creating unique branch for this generated fix: " + uniqueBranch);
+            run(repoDir, "git", "switch", "-c", uniqueBranch);
+            return uniqueBranch;
         } else {
             run(repoDir, "git", "switch", branch);
+            return branch;
         }
+    }
+
+    private static String uniqueBranchName(String branch) {
+        String buildNumber = env("BUILD_NUMBER", "").trim();
+        if (!buildNumber.isBlank()) {
+            return branch + "-build-" + buildNumber;
+        }
+        String timestamp = DateTimeFormatter.ofPattern("yyyyMMddHHmmss")
+                .withZone(ZoneOffset.UTC)
+                .format(Instant.now());
+        return branch + "-" + timestamp;
     }
 
     private static boolean commitChanges(Path repoDir, List<String> paths, String message, boolean dryRun)
