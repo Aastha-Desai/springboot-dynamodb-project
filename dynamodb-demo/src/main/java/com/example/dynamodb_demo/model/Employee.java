@@ -20,6 +20,7 @@ public class Employee {
     private String employeeId;
 
     @NotBlank
+    @Pattern(regexp = "^[a-zA-Z .'-]+$", message = "name contains invalid characters")
     @Schema(description = "Employee name. Allows letters, spaces, period, apostrophe, and dash.", example = "Asha Patel")
     private String name;
 
